@@ -6,5 +6,5 @@ CosyVoice has a slower synthesis speed, pyttsx3 sounds overly mechanical, while 
 
 All dependencies are listed in requirements.txt, and the interactive inference scripts are 10/11/12_xxx.py. 
 
-ATTENTION: 
+
 Have fun! 😊
