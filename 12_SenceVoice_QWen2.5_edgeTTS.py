@@ -87,13 +87,13 @@ def clear_folder(folder_path):
 
 # ------------------- 模型初始化 ---------------
 # --- SenceVoice-语音识别模型
-model_dir = r"E:\2_PYTHON\Project\GPT\QWen\pretrained_models\SenseVoiceSmall"
+model_dir = r".\QWen\pretrained_models\SenseVoiceSmall"
 model_senceVoice = AutoModel( model=model_dir, trust_remote_code=True, )
 
 # --- QWen2.5大语言模型 ---
-# model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-0.5B-Instruct"
-model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-1.5B-Instruct"
-# model_name = r'E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
+# model_name = r".\QWen\Qwen2.5-0.5B-Instruct"
+model_name = r".\QWen\Qwen2.5-1.5B-Instruct"
+# model_name = r'.\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype="auto",

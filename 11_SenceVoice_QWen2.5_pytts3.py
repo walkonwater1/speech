@@ -80,13 +80,13 @@ def clear_folder(folder_path):
 
 # ------------------- 模型初始化 ---------------
 # --- SenceVoice-语音识别模型
-model_dir = r"E:\2_PYTHON\Project\GPT\QWen\pretrained_models\SenseVoiceSmall"
+model_dir = r".\QWen\pretrained_models\SenseVoiceSmall"
 model_senceVoice = AutoModel( model=model_dir, trust_remote_code=True, )
 
 # --- QWen2.5大语言模型 ---
-# model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-0.5B-Instruct"
-model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-1.5B-Instruct"
-# model_name = r'E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
+# model_name = r".\QWen\Qwen2.5-0.5B-Instruct"
+model_name = r".\QWen\Qwen2.5-1.5B-Instruct"
+# model_name = r'.\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype="auto",
@@ -166,20 +166,3 @@ while(1):
     engine.save_to_file(text, os.path.join(folder_path,"sft_0.wav"))
     engine.runAndWait()
     play_audio(f'{folder_path}/sft_0.wav')
-    
-    # ['中文女', '中文男', '日语男', '粤语女', '英文女', '英文男', '韩语女']
-    # for i, j in enumerate(cosyvoice.inference_sft(f'{prompt}', '中文男', stream=False)):
-    #     torchaudio.save('prompt_sft_{}.wav'.format(i), j['tts_speech'], 22050)
-        # play_audio('prompt_sft_{}.wav'.format(i))
-
-    # change stream=True for chunk stream inference
-    # index_out = 0
-    # for i, j in enumerate(cosyvoice.inference_sft(f'{response}', '中文女', stream=False)):
-    #     torchaudio.save('{}/sft_{}.wav'.format(folder_path,i), j['tts_speech'], 22050)
-    #     index_out += 1
-        # play_audio('sft_{}.wav'.format(i))
-
-    # play_audio('my_recording.wav')
-    # for idx in range(index_out):
-    #     play_audio('{}/sft_{}.wav'.format(folder_path,idx))
-

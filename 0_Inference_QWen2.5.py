@@ -32,7 +32,7 @@ cosyvoice = CosyVoice(r'../pretrained_models/CosyVoice-300M', load_jit=True, loa
 # sft usage
 print(cosyvoice.list_avaliable_spks())
 
-prompt = "张瑶琦女士是不是世界上最可爱的女人?"
+prompt = "你好，你叫什么名字?"
 messages = [
     {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
     {"role": "user", "content": prompt},

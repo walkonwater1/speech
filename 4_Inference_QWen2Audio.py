@@ -3,7 +3,7 @@ from urllib.request import urlopen
 import librosa
 from transformers import Qwen2AudioForConditionalGeneration, AutoProcessor
 
-model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2-Audio-7B-Instruct"
+model_name = r".\QWen\Qwen2-Audio-7B-Instruct"
 processor = AutoProcessor.from_pretrained(model_name)
 model = Qwen2AudioForConditionalGeneration.from_pretrained(model_name, device_map="cuda")
 
@@ -20,11 +20,11 @@ model = Qwen2AudioForConditionalGeneration.from_pretrained(model_name, device_ma
 # 定义对话
 conversation = [
     {"role": "user", "content": [
-        {"type": "audio", "audio_path": r"E:\2_PYTHON\Project\GPT\QWen\Qwen2-Audio-7B-Instruct\guess_age_gender.wav"},     
+        {"type": "audio", "audio_path": r".\QWen\Qwen2-Audio-7B-Instruct\guess_age_gender.wav"},     
     ]},    
     {"role": "assistant", "content": "Yes, the speaker is female and in her twenties."},
     {"role": "user", "content": [
-        {"type": "audio", "audio_path": r"E:\2_PYTHON\Project\GPT\QWen\Qwen2-Audio-7B-Instruct\translate_to_chinese.wav"},
+        {"type": "audio", "audio_path": r".\QWen\Qwen2-Audio-7B-Instruct\translate_to_chinese.wav"},
     ]},
 ]
 

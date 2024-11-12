@@ -6,7 +6,7 @@
 import sys
 from funasr import AutoModel
 
-model_dir = r"E:\2_PYTHON\Project\GPT\QWen\pretrained_models\SenseVoiceSmall"
+model_dir = r".\QWen\pretrained_models\SenseVoiceSmall"
 input_file = (
     "https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/test_audio/asr_example_zh.wav"
 )
