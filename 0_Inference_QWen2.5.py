@@ -20,7 +20,7 @@ def play_audio(file_path):
     finally:
         pygame.mixer.quit()
 
-model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-0.5B-Instruct"
+model_name = r".\QWen\Qwen2.5-0.5B-Instruct"
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype="auto",
