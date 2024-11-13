@@ -13,7 +13,7 @@ SenceVoice-QWen2.5-CosyVoice搭建
 
 CoosyVoice推理速度慢，严重影响对话实时性，额外添加pyttsx3和edgeTTS
 
-EdgeTTS实验过程出现链接错误问题，升级版至6.1.17解决，无需科学上网
+EdgeTTS实验过程出现链接错误问题，升级版本至6.1.17解决，无需科学上网
 
 All dependencies are listed in requirements.txt, the interactive inference scripts are 10/11/12_SenceVoice_QWen2.5_xxx.py. 
 
