@@ -87,13 +87,13 @@ def clear_folder(folder_path):
 
 # ------------------- 模型初始化 ---------------
 # --- SenceVoice-语音识别模型
-model_dir = r".\QWen\pretrained_models\SenseVoiceSmall"
+model_dir = r"E:\2_PYTHON\Project\GPT\QWen\pretrained_models\SenseVoiceSmall"
 model_senceVoice = AutoModel( model=model_dir, trust_remote_code=True, )
 
 # --- QWen2.5大语言模型 ---
-# model_name = r".\QWen\Qwen2.5-0.5B-Instruct"
-model_name = r".\QWen\Qwen2.5-1.5B-Instruct"
-# model_name = r'.\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
+# model_name = r":\2_PYTHON\Project\GPT\QWen\Qwen2.5-0.5B-Instruct"
+model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-1.5B-Instruct"
+# model_name = r':\2_PYTHON\Project\GPT\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype="auto",
@@ -112,16 +112,13 @@ while(1):
     # 使用函数录音，作为输入
     record_audio("my_recording.wav")
 
-    # input_file = ( "https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/test_audio/asr_example_zh.wav" )
     input_file = ("my_recording.wav")
-    # model_senceVoice.to('cuda') 
     res = model_senceVoice.generate(
         input=input_file,
         cache={},
         language="auto", # "zn", "en", "yue", "ja", "ko", "nospeech"
         use_itn=False,
     )
-    # model_senceVoice.to('cpu') 
 
     # -------- 模型推理阶段，将语音识别结果作为大模型Prompt ------
     prompt = res[0]['text'].split(">")[-1] + "，回答简短一些，保持50字以内！"
@@ -136,7 +133,6 @@ while(1):
     )
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
-    # model.to('cuda')
     generated_ids = model.generate(
         **model_inputs,
         max_new_tokens=512,
@@ -146,7 +142,6 @@ while(1):
     ]
 
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    # model.to('cpu')
 
     print("Input:", prompt)
     print("Answer:", response)

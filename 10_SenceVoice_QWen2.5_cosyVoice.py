@@ -80,13 +80,13 @@ def clear_folder(folder_path):
 
 # ------------------- 模型初始化 ---------------
 # --- SenceVoice-语音识别模型
-model_dir = r".\QWen\pretrained_models\SenseVoiceSmall"
+model_dir = r"E:\2_PYTHON\Project\GPT\QWen\pretrained_models\SenseVoiceSmall"
 model_senceVoice = AutoModel( model=model_dir, trust_remote_code=True, )
 
 # --- QWen2.5大语言模型 ---
-# model_name = r".\QWen\Qwen2.5-0.5B-Instruct"
-model_name = r".\QWen\Qwen2.5-1.5B-Instruct"
-# model_name = r'.\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
+# model_name = r":\2_PYTHON\Project\GPT\QWen\Qwen2.5-0.5B-Instruct"
+model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-1.5B-Instruct"
+# model_name = r':\2_PYTHON\Project\GPT\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype="auto",
@@ -95,7 +95,7 @@ model = AutoModelForCausalLM.from_pretrained(
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 # --- CosyVoice - 语音合成模型
-cosyvoice = CosyVoice(r'../pretrained_models/CosyVoice-300M', load_jit=True, load_onnx=False, fp16=True)
+cosyvoice = CosyVoice(r'E:\2_PYTHON\Project\GPT\QWen\pretrained_models\CosyVoice-300M', load_jit=True, load_onnx=False, fp16=True)
 # --- CosyVoice - 支持的音色列表
 print(cosyvoice.list_avaliable_spks())
 # ------------------ 模型初始化结束 ----------------
@@ -106,14 +106,12 @@ while(1):
 
     # input_file = ( "https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/test_audio/asr_example_zh.wav" )
     input_file = ("my_recording.wav")
-    # model_senceVoice.to('cuda') 
     res = model_senceVoice.generate(
         input=input_file,
         cache={},
         language="auto", # "zn", "en", "yue", "ja", "ko", "nospeech"
         use_itn=False,
     )
-    # model_senceVoice.to('cpu') 
 
     # -------- 模型推理阶段，将语音识别结果作为大模型Prompt ------
     prompt = res[0]['text'].split(">")[-1] + "，回答简短一些，保持50字以内！"
@@ -128,7 +126,6 @@ while(1):
     )
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
-    # model.to('cuda')
     generated_ids = model.generate(
         **model_inputs,
         max_new_tokens=512,
@@ -138,7 +135,6 @@ while(1):
     ]
 
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    # model.to('cpu')
 
     print("Input:", prompt)
     print("Answer:", response)
@@ -148,10 +144,6 @@ while(1):
     clear_folder(folder_path)
 
     # ['中文女', '中文男', '日语男', '粤语女', '英文女', '英文男', '韩语女']
-    # for i, j in enumerate(cosyvoice.inference_sft(f'{prompt}', '中文男', stream=False)):
-    #     torchaudio.save('prompt_sft_{}.wav'.format(i), j['tts_speech'], 22050)
-        # play_audio('prompt_sft_{}.wav'.format(i))
-
     # change stream=True for chunk stream inference
     index_out = 0
     for i, j in enumerate(cosyvoice.inference_sft(f'{response}', '中文女', stream=False)):
@@ -159,7 +151,6 @@ while(1):
         index_out += 1
         # play_audio('sft_{}.wav'.format(i))
 
-    # play_audio('my_recording.wav')
     for idx in range(index_out):
         play_audio('{}/sft_{}.wav'.format(folder_path,idx))
 
