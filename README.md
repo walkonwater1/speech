@@ -8,6 +8,7 @@
 
 14_SenceVoice_QWen2VL_edgeTTS_realTime.py
 
+[演示demo,b站] (https://www.bilibili.com/video/BV1uQBCYrEYL)
 
 # 语音交互大模型/SenceVoice-QWen2.5-TTS
 
