@@ -8,10 +8,25 @@ import asyncio
 
 import edge_tts
 
-TEXT = "Hello World!"
-VOICE = "en-GB-SoniaNeural"
-OUTPUT_FILE = "test.mp3"
+# TEXT = "今日特别报道，伊朗、舍沙特阿拉伯在北京中方见证下，决定恢复外交关系，重启大使馆并互相派驻外交大使"
+# VOICE = "zh-CN-YunxiNeural"
+# OUTPUT_FILE = "test_male.mp3"
 
+# TEXT = "はそれぞれ"
+# VOICE = "ja-JP-NanamiNeural"
+# OUTPUT_FILE = "test_male.mp3"
+
+# TEXT = "Estoy bien, gracias. ¿Y tú?"
+# VOICE = "ca-ES-JoanaNeural"
+# OUTPUT_FILE = "test_male.mp3"
+
+# TEXT = "Ça va bien, merci. Et toi ?"
+# VOICE = "fr-FR-DeniseNeural"
+# OUTPUT_FILE = "test_male.mp3"
+
+TEXT = "hello, whats your name"
+VOICE = "en-US-AnaNeural"
+OUTPUT_FILE = "test_male.mp3"
 
 async def amain() -> None:
     """Main function"""

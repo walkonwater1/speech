@@ -91,8 +91,8 @@ model_dir = r"E:\2_PYTHON\Project\GPT\QWen\pretrained_models\SenseVoiceSmall"
 model_senceVoice = AutoModel( model=model_dir, trust_remote_code=True, )
 
 # --- QWen2.5大语言模型 ---
-# model_name = r":\2_PYTHON\Project\GPT\QWen\Qwen2.5-0.5B-Instruct"
-model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-1.5B-Instruct"
+model_name = r":\2_PYTHON\Project\GPT\QWen\Qwen2.5-0.5B-Instruct"
+# model_name = r"E:\2_PYTHON\Project\GPT\QWen\Qwen2.5-1.5B-Instruct"
 # model_name = r':\2_PYTHON\Project\GPT\QWen\Qwen2.5-7B-Instruct-GPTQ-Int4'
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
@@ -152,5 +152,5 @@ while(1):
 
     # 输入文本
     text = response
-    asyncio.run(amain(text, "zh-TW-HsiaoChenNeural", os.path.join(folder_path,"sft_0.mp3")))
+    asyncio.run(amain(text, "zh-CN-XiaoyiNeural", os.path.join(folder_path,"sft_0.mp3")))
     play_audio(f'{folder_path}/sft_0.mp3')
