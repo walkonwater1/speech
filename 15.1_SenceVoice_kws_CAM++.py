@@ -405,7 +405,7 @@ def Inference(TEMP_AUDIO_FILE=f"{OUTPUT_DIR}/audio_0.wav"):
                 
                 # prompt_tmp = res[0]['text'].split(">")[-1] + "，回答简短一些，保持50字以内！"
                 prompt_tmp = res[0]['text'].split(">")[-1]
-                prompt = f"{context}\nUser:{prompt_tmp}\nModel:"
+                prompt = f"{context}\nUser:{prompt_tmp}\nsystem:"
 
                 print("History:", context)
                 print("ASR OUT:", prompt)
