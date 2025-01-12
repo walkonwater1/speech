@@ -1,3 +1,46 @@
+# 环境配置详细教程
+
+0. anaconda\ffmpeg安装
+```
+    网上很多教程，自行搜索
+```
+1. 创建虚拟环境
+```
+    conda create -n chatAudio python=3.10
+    conda activate chatAudio
+```
+2. 安装pytorch+cuda版本，本地测试2.0以上版本均可，这里安装torch=2.3.1+cuda11.8
+```
+    pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu118
+
+    其它适合自己电脑的torch+cuda版本可在torch官网查找
+    https://pytorch.org/get-started/previous-versions/
+```
+
+3. 简易版本安装，不使用cosyvoice时依赖项较少
+```
+    pip install edge-tts==6.1.17 funasr==1.1.12 ffmpeg==1.4 opencv-python==4.10.0.84 transformers==4.45.2 webrtcvad==2.0.10 qwen-vl-utils==0.0.8 pygame==2.6.1 langid==1.1.6 langdetect==1.0.9 accelerate==0.33.0 PyAudio==0.2.14
+
+    可执行验证：
+    python 13_SenceVoice_QWen2.5_edgeTTS_realTime.py
+```
+至此，不调用cosyvoice作为合成的交互可成功调用了。
+
+4. cosyvoice依赖库
+```
+    大家反馈较多pynini、wetext安装方法：
+    conda install -c conda-forge pynini=2.1.6
+    pip install WeTextProcessing --no-deps
+```
+
+5. cosyvoice其它依赖项安装（如遇到权限问题导致安装失败，以管理员形式打开终端）
+```
+   pip install HyperPyYAML==1.2.2 modelscope==1.15.0 onnxruntime==1.19.2 openai-whisper==20231117 importlib_resources==6.4.5 sounddevice==0.5.1 matcha-tts==0.0.7.0
+
+   可执行验证：
+    python 10_SenceVoice_QWen2.5_cosyVoice.py
+```
+
 # :sparkles: 241130-updata
 
 ## 新增声纹识别功能

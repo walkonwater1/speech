@@ -6,8 +6,15 @@ cosyvoice = CosyVoice(r'../pretrained_models/CosyVoice-300M', load_jit=True, loa
 # sft usage
 print(cosyvoice.list_avaliable_spks())
 # change stream=True for chunk stream inference
-for i, j in enumerate(cosyvoice.inference_sft('你好，我是通义生成式语音大模型，请问有什么可以帮您的吗？', '中文女', stream=False)):
-    torchaudio.save('sft_{}.wav'.format(i), j['tts_speech'], 22050)
+# out = cosyvoice.inference_sft('你好，我是通义生成式语音大模型，请问有什么可以帮您的吗？', '中文女', stream=False)
+# torchaudio.save('sft_0.wav', out['tts_speech'], 22050)
+
+# for i, j in enumerate(cosyvoice.inference_sft('你好，我是通义生成式语音大模型，请问有什么可以帮您的吗？', '中文女', stream=False)):
+#     torchaudio.save('sft_{}.wav'.format(i), j['tts_speech'], 22050)
+
+prompt_speech_16k = load_wav('vocal_3.mp3_10.wav_0006151680_0006360320.wav', 16000)
+for i, j in enumerate(cosyvoice.inference_zero_shot('收到好友从远方寄来的生日礼物，那份意外的惊喜', '可以动动你的小手点个关注，感谢各位好哥哥，如果之后有新消息，我还会在更新呢。', prompt_speech_16k, stream=False)):
+    torchaudio.save('zero_shot_{}.wav'.format(i), j['tts_speech'], 22050)
 
 # cosyvoice = CosyVoice('pretrained_models/CosyVoice-300M-25Hz') # or change to pretrained_models/CosyVoice-300M for 50Hz inference
 # # zero_shot usage, <|zh|><|en|><|jp|><|yue|><|ko|> for Chinese/English/Japanese/Cantonese/Korean
