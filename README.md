@@ -1,5 +1,7 @@
 # 环境配置详细教程 [B站](https://www.bilibili.com/video/BV1HucueQEJo/)
 
+> 本项目基于 [ABexit/ASR-LLM-TTS](https://github.com/ABexit/ASR-LLM-TTS)，感谢原作者的贡献。
+
 0. anaconda\ffmpeg安装
 ```
     网上很多教程，自行搜索
