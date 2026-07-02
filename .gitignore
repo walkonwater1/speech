@@ -56,3 +56,6 @@ out_answer/
 # Keep wav files in asset/ only
 *.wav
 !asset/*.wav
+
+# Claude Code
+.claude/
