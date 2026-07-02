@@ -21,7 +21,7 @@ python scripts/full_pipeline_kws_sv.py
 ## 目录结构
 
 ```
-src/                                  🔧 功能模块（每个对应一个 C++ 实现）
+src/                                  🔧 Python 功能模块（每个对应一个 C++ 实现）
   config.py                             PipelineConfig — 管线配置结构体
   asr.py                                ASREngine — 语音识别（→ sherpa-onnx）
   llm.py                                LLMEngine — 大模型推理（→ llama.cpp）
@@ -32,7 +32,14 @@ src/                                  🔧 功能模块（每个对应一个 C++
   audio_io.py                           AudioRecorder / AudioPlayer（→ 硬件SDK）
   pipeline.py                           VoicePipeline — 管线编排（→ 机器人主控类）
 
-scripts/                              📜 脚本入口（薄层，只调 src/ 模块）
+cpp/                                  🔨 C++ 实现（可直接编译运行）
+  include/                              头文件（每个 .h 对应一个 Python 模块）
+  src/                                  实现文件
+  main.cpp                              Demo 主函数
+  CMakeLists.txt                         编译配置
+  build/voice_pipeline                   编译产物
+
+scripts/                              📜 Python 脚本入口（薄层，只调 src/ 模块）
   full_pipeline.py                     基础版：ASR → LLM → TTS
   full_pipeline_kws_sv.py              完整版：+唤醒词+声纹+对话记忆
   run_realtime.py                      实时打断版（VAD）
@@ -87,6 +94,27 @@ docs/                                 📖 文档
 详见 [docs/LEARNING_ROADMAP.md](docs/LEARNING_ROADMAP.md)。
 
 ## 修改记录
+
+### 2026-07-02（续3）：C++ 实现
+
+**结果**：`cpp/` 目录，9 个头文件 + 8 个实现文件，零 warning 编译通过。
+
+| 模块 | 状态 | 依赖 |
+|------|------|------|
+| LLM (llm_engine) | ✅ 可用 | libcurl + nlohmann/json → Ollama HTTP |
+| TTS (tts_engine) | ✅ 可用 | libespeak-ng.so (系统自带) |
+| KWS (wake_word) | ✅ 可用 | 纯 C++，400+ 汉字拼音表 |
+| 记忆 (chat_memory) | ✅ 可用 | std::deque |
+| 音频 (audio_io) | ✅ 可用 | ALSA arecord/aplay |
+| ASR (asr_engine) | ⏳ 等待 sherpa-onnx | 取消 `#define SHERPA_ONNX_AVAILABLE` 注释即可 |
+| 声纹 (speaker_verifier) | ⏳ 等待 sherpa-onnx | 同上 |
+
+编译运行:
+```bash
+cd cpp && mkdir build && cd build
+cmake .. && make -j
+./voice_pipeline
+```
 
 ### 2026-07-02（续2）：模块化重构 — C++ 可读
 

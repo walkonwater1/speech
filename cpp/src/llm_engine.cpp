@@ -1,0 +1,112 @@
+/**
+ * 大语言模型推理 — Ollama HTTP API
+ *
+ * Python 对应: src/llm.py → LLMEngine (ollama.chat)
+ * C++ 实现:   libcurl + nlohmann/json → POST /api/chat
+ *
+ * Ollama 是本地服务(localhost:11434)，底层是 llama.cpp。
+ * 如果要完全嵌入（无 Ollama 进程），替换为 llama.h C API。
+ */
+
+#include "llm_engine.h"
+
+#include <curl/curl.h>
+#include <nlohmann/json.hpp>
+
+#include <iostream>
+#include <sstream>
+#include <chrono>
+
+using json = nlohmann::json;
+
+// ── libcurl 回调：将响应写入 string ──────────────────
+
+static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdata)
+{
+    auto* str = static_cast<std::string*>(userdata);
+    str->append(ptr, size * nmemb);
+    return size * nmemb;
+}
+
+// ── LLMEngine ────────────────────────────────────────
+
+LLMEngine::LLMEngine(const std::string& host,
+                     const std::string& model,
+                     const std::string& system_prompt)
+    : host_(host)
+    , model_(model)
+    , system_prompt_(system_prompt)
+{}
+
+std::string LLMEngine::chat(const std::string& user_message,
+                            const std::string& history_context)
+{
+    auto t0 = std::chrono::steady_clock::now();
+
+    // 拼接 prompt
+    std::string prompt = user_message;
+    if (!history_context.empty()) {
+        prompt = history_context + "\nUser: " + user_message + "\nAssistant:";
+    }
+
+    // 构造 JSON 请求体
+    json body;
+    body["model"] = model_;
+    body["stream"] = false;
+    body["messages"] = json::array({
+        {{"role", "system"}, {"content", system_prompt_}},
+        {{"role", "user"},   {"content", prompt}}
+    });
+
+    std::string request_json = body.dump();
+
+    // 发送 HTTP POST
+    std::string reply;
+    try {
+        std::string response = http_post(request_json);
+        json resp_json = json::parse(response);
+        reply = resp_json.value("message", json::object()).value("content", "");
+    } catch (const std::exception& e) {
+        reply = std::string("[Ollama 错误: ") + e.what() + "]";
+    }
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    std::cout << "   [LLM] \"" << reply << "\"  ("
+              << elapsed / 1000.0 << "s)" << std::endl;
+
+    return reply;
+}
+
+std::string LLMEngine::http_post(const std::string& request_json)
+{
+    std::string url = host_ + "/api/chat";
+    std::string response;
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        throw std::runtime_error("curl_easy_init 失败");
+    }
+
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_json.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)request_json.size());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);  // LLM 推理可能较慢
+
+    CURLcode res = curl_easy_perform(curl);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        throw std::runtime_error(std::string("curl 错误: ") + curl_easy_strerror(res));
+    }
+
+    return response;
+}
