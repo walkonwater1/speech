@@ -70,7 +70,7 @@ bool SpeakerVerifier::initialize()
 
 #ifdef SHERPA_ONNX_AVAILABLE
     // 1. 创建 embedding extractor
-    std::string model_path = "cpp/third_party/sherpa-onnx/speaker-verification-model/"
+    std::string model_path = "src/third_party/sherpa-onnx/speaker-verification-model/"
                              "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx";
 
     SherpaOnnxSpeakerEmbeddingExtractorConfig extractor_config;

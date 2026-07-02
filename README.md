@@ -22,25 +22,25 @@ ollama pull qwen2.5:1.5b
 ```bash
 # 下载 sherpa-onnx 运行时库
 # 从 https://github.com/k2-fsa/sherpa-onnx/releases 下载 Linux x64 版本
-# 解压到 cpp/third_party/sherpa-onnx/
+# 解压到 src/third_party/sherpa-onnx/
 
 # 下载 ASR 模型（SenseVoice Small int8 ~228MB）
-# 下载到 cpp/third_party/sherpa-onnx/sense-voice-model/
+# 下载到 src/third_party/sherpa-onnx/sense-voice-model/
 #   - model.int8.onnx
 #   - tokens.txt
 
 # 下载声纹模型（CAM++ ~27MB）
-# 下载到 cpp/third_party/sherpa-onnx/speaker-verification-model/
+# 下载到 src/third_party/sherpa-onnx/speaker-verification-model/
 #   - 3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
 ```
 
 ### 3. 编译运行
 
 ```bash
-cd cpp && mkdir -p build && cd build
+cd src && mkdir -p build && cd build
 cmake .. && make -j$(nproc)
 cd ../..  # 回到项目根目录
-./cpp/build/voice_pipeline
+./src/build/voice_pipeline
 ```
 
 **必须在项目根目录运行**（模型路径使用相对路径）。
@@ -66,7 +66,7 @@ cd ../..  # 回到项目根目录
 ## 架构
 
 ```
-cpp/
+src/
 ├── CMakeLists.txt              # 编译配置
 ├── main.cpp                    # 入口 + 交互菜单
 ├── include/                    # 头文件
@@ -79,15 +79,16 @@ cpp/
 │   ├── chat_memory.h           # ChatMemory — 对话记忆
 │   ├── audio_io.h              # AudioRecorder / AudioPlayer（ALSA）
 │   └── voice_pipeline.h        # VoicePipeline — 管线编排
-└── src/                        # 实现文件（与头文件一一对应）
-    ├── asr_engine.cpp
-    ├── llm_engine.cpp
-    ├── tts_engine.cpp
-    ├── wake_word.cpp
-    ├── speaker_verifier.cpp
-    ├── chat_memory.cpp
-    ├── audio_io.cpp
-    └── voice_pipeline.cpp
+├── src/                        # 实现文件（与头文件一一对应）
+│   ├── asr_engine.cpp
+│   ├── llm_engine.cpp
+│   ├── tts_engine.cpp
+│   ├── wake_word.cpp
+│   ├── speaker_verifier.cpp
+│   ├── chat_memory.cpp
+│   ├── audio_io.cpp
+│   └── voice_pipeline.cpp
+└── third_party/                # sherpa-onnx 库 + 模型（需手动下载）
 ```
 
 ## 环境

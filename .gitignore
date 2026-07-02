@@ -61,4 +61,4 @@ out_answer/
 .claude/
 
 # Third-party downloaded binaries (sherpa-onnx)
-cpp/third_party/
+src/third_party/
