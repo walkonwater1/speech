@@ -3,13 +3,15 @@
  * 声纹验证 (Speaker Verification)
  *
  * Python 对应: src/speaker.py → SpeakerVerifier
- * 依赖:      sherpa-onnx C API (speaker verification model)
+ * 依赖:      sherpa-onnx C API v1.13+ (SpeakerEmbeddingExtractor + SpeakerEmbeddingManager)
  */
 
 #include <string>
+#include <vector>
 #include <memory>
 
-struct SherpaOnnxSpeakerVerificationModel;
+struct SherpaOnnxSpeakerEmbeddingExtractor;
+struct SherpaOnnxSpeakerEmbeddingManager;
 
 class SpeakerVerifier {
 public:
@@ -43,8 +45,12 @@ public:
 private:
     std::string enroll_dir_;
     float threshold_;
-    const SherpaOnnxSpeakerVerificationModel* model_ = nullptr;
+    const SherpaOnnxSpeakerEmbeddingExtractor* extractor_ = nullptr;
+    const SherpaOnnxSpeakerEmbeddingManager* manager_ = nullptr;
     bool initialized_ = false;
 
     std::string enroll_path() const;
+
+    /// 从 WAV 文件计算声纹嵌入
+    bool compute_embedding(const std::string& wav_path, std::vector<float>& embedding);
 };

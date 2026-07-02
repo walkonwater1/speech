@@ -2,22 +2,23 @@
  * 声纹验证 — sherpa-onnx Speaker Verification
  *
  * Python 对应: src/speaker.py → SpeakerVerifier (CAM++, modelscope)
- * C++ 实现:   sherpa-onnx speaker verification C API
+ * C++ 实现:   sherpa-onnx speaker embedding + manager API v1.13+
  *
- * 编译依赖: libsherpa-onnx.so + sherpa-onnx/c-api/c-api.h
+ * 编译依赖: libsherpa-onnx-c-api.so + sherpa-onnx/c-api/c-api.h
+ * 模型: 3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
  */
 
 #include "speaker_verifier.h"
 
-// 下载 sherpa-onnx 后取消注释:
-// #define SHERPA_ONNX_AVAILABLE
-
+// SHERPA_ONNX_AVAILABLE 由 CMakeLists.txt 通过 add_compile_definitions 定义
 #ifdef SHERPA_ONNX_AVAILABLE
   #include "sherpa-onnx/c-api/c-api.h"
 #endif
 
 #include <iostream>
 #include <fstream>
+#include <cstring>
+#include <vector>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -37,13 +38,8 @@ static bool copy_file(const std::string& src, const std::string& dst)
 
 static bool is_dir_empty(const std::string& path)
 {
-    struct stat st;
-    if (stat(path.c_str(), &st) != 0) return true;
-    if (!S_ISDIR(st.st_mode)) return true;
-
-    // 检查是否有 .wav 文件
-    // 简化：检查目录是否有任何文件
-    return access((path + "/enroll_0.wav").c_str(), F_OK) != 0;
+    if (access((path + "/enroll_0.wav").c_str(), F_OK) != 0) return true;
+    return false;
 }
 
 // ── SpeakerVerifier ──────────────────────────────────
@@ -56,8 +52,11 @@ SpeakerVerifier::SpeakerVerifier(const std::string& enroll_dir, float threshold)
 SpeakerVerifier::~SpeakerVerifier()
 {
 #ifdef SHERPA_ONNX_AVAILABLE
-    if (model_) {
-        SherpaOnnxSpeakerVerificationModelDestroy(model_);
+    if (manager_) {
+        SherpaOnnxDestroySpeakerEmbeddingManager(manager_);
+    }
+    if (extractor_) {
+        SherpaOnnxDestroySpeakerEmbeddingExtractor(extractor_);
     }
 #endif
 }
@@ -70,19 +69,28 @@ bool SpeakerVerifier::initialize()
     mkdir(enroll_dir_.c_str(), 0755);
 
 #ifdef SHERPA_ONNX_AVAILABLE
-    // sherpa-onnx speaker verification model
-    // 需要下载模型文件，例如 3D-Speaker / CAM++
-    std::string model_path = "cpp/third_party/sherpa-onnx/speaker-verification-model";
+    // 1. 创建 embedding extractor
+    std::string model_path = "cpp/third_party/sherpa-onnx/speaker-verification-model/"
+                             "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx";
 
-    SherpaOnnxSpeakerVerificationModelConfig* config =
-        SherpaOnnxSpeakerVerificationModelConfigCreate();
-    SherpaOnnxSpeakerVerificationModelConfigSetModel(config, model_path.c_str());
+    SherpaOnnxSpeakerEmbeddingExtractorConfig extractor_config;
+    memset(&extractor_config, 0, sizeof(extractor_config));
+    extractor_config.model = model_path.c_str();
+    extractor_config.num_threads = 4;
+    extractor_config.provider = "cpu";
 
-    model_ = SherpaOnnxCreateSpeakerVerificationModel(config);
-    SherpaOnnxSpeakerVerificationModelConfigDelete(config);
+    extractor_ = SherpaOnnxCreateSpeakerEmbeddingExtractor(&extractor_config);
+    if (!extractor_) {
+        std::cerr << "❌ 加载声纹模型失败: " << model_path << std::endl;
+        std::cerr << "   请下载模型: https://github.com/k2-fsa/sherpa-onnx/releases" << std::endl;
+        return false;
+    }
 
-    if (!model_) {
-        std::cerr << "❌ 加载声纹模型失败" << std::endl;
+    // 2. 创建 embedding manager
+    int32_t dim = SherpaOnnxSpeakerEmbeddingExtractorDim(extractor_);
+    manager_ = SherpaOnnxCreateSpeakerEmbeddingManager(dim);
+    if (!manager_) {
+        std::cerr << "❌ 创建 embedding manager 失败" << std::endl;
         return false;
     }
 #else
@@ -92,7 +100,7 @@ bool SpeakerVerifier::initialize()
 #endif
 
     initialized_ = true;
-    std::cout << "✅" << std::endl;
+    std::cout << "✅ (dim=" << SherpaOnnxSpeakerEmbeddingExtractorDim(extractor_) << ")" << std::endl;
     return true;
 }
 
@@ -117,14 +125,21 @@ std::string SpeakerVerifier::enroll_path() const
 
 bool SpeakerVerifier::enroll(const std::string& wav_path)
 {
-    // 检查时长 > 3 秒
-    // (简化: 直接复制文件)
     mkdir(enroll_dir_.c_str(), 0755);
 
+    // 复制文件到注册目录
     if (!copy_file(wav_path, enroll_path())) {
         std::cerr << "   [SV] 保存注册语音失败" << std::endl;
         return false;
     }
+
+#ifdef SHERPA_ONNX_AVAILABLE
+    // 计算声纹嵌入并注册到 manager
+    std::vector<float> embedding;
+    if (compute_embedding(wav_path, embedding)) {
+        SherpaOnnxSpeakerEmbeddingManagerAdd(manager_, "default_user", embedding.data());
+    }
+#endif
 
     std::cout << "   [SV] ✅ 声纹注册完成 → " << enroll_path() << std::endl;
     return true;
@@ -138,19 +153,82 @@ bool SpeakerVerifier::verify(const std::string& test_wav)
     }
 
 #ifdef SHERPA_ONNX_AVAILABLE
-    if (!model_) return false;
+    if (!extractor_ || !manager_) return false;
 
-    float similarity = SherpaOnnxSpeakerVerificationModelVerify(
-        model_, enroll_path().c_str(), test_wav.c_str());
+    // 计算测试音频的声纹嵌入
+    std::vector<float> embedding;
+    if (!compute_embedding(test_wav, embedding)) {
+        std::cerr << "   [SV] 无法计算测试音频嵌入" << std::endl;
+        return false;
+    }
 
-    bool passed = similarity >= threshold_;
+    // 验证
+    int32_t matched = SherpaOnnxSpeakerEmbeddingManagerVerify(
+        manager_, "default_user", embedding.data(), threshold_);
+
+    bool passed = (matched == 1);
     std::cout << "   [SV] " << (passed ? "✅ 通过" : "❌ 拒绝")
-              << " (相似度: " << similarity << ", 阈值: " << threshold_ << ")" << std::endl;
+              << " (阈值: " << threshold_ << ")" << std::endl;
 
     return passed;
 #else
-    (void)test_wav;  // 未使用
+    (void)test_wav;
     std::cerr << "   [SV] ⚠️ sherpa-onnx 不可用，跳过验证" << std::endl;
     return true;  // 降级: 通过（不阻塞流程）
+#endif
+}
+
+bool SpeakerVerifier::compute_embedding(const std::string& wav_path,
+                                        std::vector<float>& embedding)
+{
+#ifdef SHERPA_ONNX_AVAILABLE
+    // 读取 WAV 文件
+    const SherpaOnnxWave* wave = SherpaOnnxReadWave(wav_path.c_str());
+    if (!wave) {
+        std::cerr << "   [SV] 无法读取音频: " << wav_path << std::endl;
+        return false;
+    }
+
+    // 创建 stream 并喂入音频
+    const SherpaOnnxOnlineStream* stream =
+        SherpaOnnxSpeakerEmbeddingExtractorCreateStream(extractor_);
+    if (!stream) {
+        SherpaOnnxFreeWave(wave);
+        return false;
+    }
+
+    SherpaOnnxOnlineStreamAcceptWaveform(
+        stream, wave->sample_rate, wave->samples, wave->num_samples);
+    SherpaOnnxOnlineStreamInputFinished(stream);
+
+    // 等待足够音频计算 embedding
+    if (!SherpaOnnxSpeakerEmbeddingExtractorIsReady(extractor_, stream)) {
+        std::cerr << "   [SV] 音频不足，无法计算声纹" << std::endl;
+        SherpaOnnxDestroyOnlineStream(stream);
+        SherpaOnnxFreeWave(wave);
+        return false;
+    }
+
+    // 计算 embedding
+    const float* emb = SherpaOnnxSpeakerEmbeddingExtractorComputeEmbedding(
+        extractor_, stream);
+    if (!emb) {
+        SherpaOnnxDestroyOnlineStream(stream);
+        SherpaOnnxFreeWave(wave);
+        return false;
+    }
+
+    int32_t dim = SherpaOnnxSpeakerEmbeddingExtractorDim(extractor_);
+    embedding.assign(emb, emb + dim);
+
+    SherpaOnnxSpeakerEmbeddingExtractorDestroyEmbedding(emb);
+    SherpaOnnxDestroyOnlineStream(stream);
+    SherpaOnnxFreeWave(wave);
+
+    return true;
+#else
+    (void)wav_path;
+    (void)embedding;
+    return false;
 #endif
 }

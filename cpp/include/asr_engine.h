@@ -3,7 +3,7 @@
  * 语音识别引擎 (ASR)
  *
  * Python 对应: src/asr.py → ASREngine
- * 依赖:      sherpa-onnx C API
+ * 依赖:      sherpa-onnx C API (v1.13+)
  */
 
 #include <string>
@@ -11,7 +11,6 @@
 
 // sherpa-onnx C API 前向声明
 struct SherpaOnnxOfflineRecognizer;
-struct SherpaOnnxOfflineRecognizerConfig;
 
 class ASREngine {
 public:

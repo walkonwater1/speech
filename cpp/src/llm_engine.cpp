@@ -19,6 +19,74 @@
 
 using json = nlohmann::json;
 
+// ── UTF-8 清洗 ────────────────────────────────────────
+
+/// 移除字符串中的非法 UTF-8 字节序列，替换为 U+FFFD
+static std::string sanitize_utf8(const std::string& input)
+{
+    std::string result;
+    result.reserve(input.size());
+
+    size_t i = 0;
+    while (i < input.size()) {
+        unsigned char c = static_cast<unsigned char>(input[i]);
+
+        // ASCII (0x00-0x7F)
+        if (c <= 0x7F) {
+            result.push_back(c);
+            ++i;
+        }
+        // 2-byte sequence (0xC0-0xDF)
+        else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 < input.size() &&
+                (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80) {
+                result.push_back(c);
+                result.push_back(input[i+1]);
+                i += 2;
+            } else {
+                result += "\xEF\xBF\xBD"; // U+FFFD
+                ++i;
+            }
+        }
+        // 3-byte sequence (0xE0-0xEF)
+        else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 < input.size() &&
+                (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
+                (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80) {
+                result.push_back(c);
+                result.push_back(input[i+1]);
+                result.push_back(input[i+2]);
+                i += 3;
+            } else {
+                result += "\xEF\xBF\xBD"; // U+FFFD
+                ++i;
+            }
+        }
+        // 4-byte sequence (0xF0-0xF7)
+        else if ((c & 0xF8) == 0xF0) {
+            if (i + 3 < input.size() &&
+                (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
+                (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80 &&
+                (static_cast<unsigned char>(input[i+3]) & 0xC0) == 0x80) {
+                result.push_back(c);
+                result.push_back(input[i+1]);
+                result.push_back(input[i+2]);
+                result.push_back(input[i+3]);
+                i += 4;
+            } else {
+                result += "\xEF\xBF\xBD"; // U+FFFD
+                ++i;
+            }
+        }
+        // Invalid lead byte
+        else {
+            result += "\xEF\xBF\xBD"; // U+FFFD
+            ++i;
+        }
+    }
+    return result;
+}
+
 // ── libcurl 回调：将响应写入 string ──────────────────
 
 static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdata)
@@ -64,6 +132,7 @@ std::string LLMEngine::chat(const std::string& user_message,
     std::string reply;
     try {
         std::string response = http_post(request_json);
+        response = sanitize_utf8(response);
         json resp_json = json::parse(response);
         reply = resp_json.value("message", json::object()).value("content", "");
     } catch (const std::exception& e) {
