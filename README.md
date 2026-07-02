@@ -5,46 +5,27 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+```bash
+# 一键安装依赖 + 下载模型 + 编译 + 运行
+./setup.sh --run
+
+# 或者分步执行
+./setup.sh              # 安装依赖 + 下载模型 + 编译
+./setup.sh --models     # 仅下载模型
+./setup.sh --build      # 仅编译
+./setup.sh --clean      # 清理编译产物
+```
+
+首次运行前确保已安装 Ollama 并拉取模型：
 
 ```bash
-# 系统库
-sudo apt install -y espeak-ng libcurl4 nlohmann-json3-dev cmake g++
-
-# Ollama（LLM 后台服务）
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull qwen2.5:1.5b
 ```
 
-### 2. 下载 sherpa-onnx + 模型
-
-```bash
-# 下载 sherpa-onnx 运行时库
-# 从 https://github.com/k2-fsa/sherpa-onnx/releases 下载 Linux x64 版本
-# 解压到 src/third_party/sherpa-onnx/
-
-# 下载 ASR 模型（SenseVoice Small int8 ~228MB）
-# 下载到 src/third_party/sherpa-onnx/sense-voice-model/
-#   - model.int8.onnx
-#   - tokens.txt
-
-# 下载声纹模型（CAM++ ~27MB）
-# 下载到 src/third_party/sherpa-onnx/speaker-verification-model/
-#   - 3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
-```
-
-### 3. 编译运行
-
-```bash
-cd src && mkdir -p build && cd build
-cmake .. && make -j$(nproc)
-cd ../..  # 回到项目根目录
-./src/build/voice_pipeline
-```
-
 **必须在项目根目录运行**（模型路径使用相对路径）。
 
-### 4. 交互命令
+### 交互命令
 
 | 输入 | 功能 |
 |---|---|
