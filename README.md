@@ -1,6 +1,5 @@
 # ASR-LLM-TTS 本地语音交互（C++ 版）
 
-基于 [ABexit/ASR-LLM-TTS](https://github.com/ABexit/ASR-LLM-TTS) 重构，感谢原作者贡献。
 
 **语音交互管线：ASR → 唤醒词 → 声纹 → LLM → TTS → 播放**，纯 C++ 实现。
 
@@ -105,4 +104,4 @@ src/
 
 ## 许可证
 
-Apache 2.0. 原始项目作者 [ABexit](https://github.com/ABexit/ASR-LLM-TTS)。
+Apache 2.0.
