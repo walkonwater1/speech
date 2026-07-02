@@ -13,7 +13,6 @@
 
 #include "wake_word.h"
 
-#include <regex>
 #include <iostream>
 
 // ════════════════════════════════════════════════════════════════
@@ -151,8 +150,6 @@ bool WakeWordDetector::detect(const std::string& asr_text)
 
 std::string WakeWordDetector::text_to_pinyin(const std::string& text)
 {
-    // 提取所有汉字
-    std::regex chinese_re("[\\u4e00-\\u9fa5]");
     std::string result;
 
     const auto& table = pinyin_table();
