@@ -21,8 +21,19 @@ python scripts/full_pipeline_kws_sv.py
 ## 目录结构
 
 ```
-scripts/                              ✅ 核心脚本
-  full_pipeline.py                     基础版：录音→ASR→LLM→TTS
+src/                                  🔧 功能模块（每个对应一个 C++ 实现）
+  config.py                             PipelineConfig — 管线配置结构体
+  asr.py                                ASREngine — 语音识别（→ sherpa-onnx）
+  llm.py                                LLMEngine — 大模型推理（→ llama.cpp）
+  tts.py                                TTSEngine — 语音合成（→ sherpa-onnx Kokoro）
+  kws.py                                WakeWordDetector — 唤醒词检测（→ 拼音表）
+  speaker.py                            SpeakerVerifier — 声纹验证（→ sherpa-onnx SV）
+  memory.py                             ChatMemory — 对话记忆（→ std::vector）
+  audio_io.py                           AudioRecorder / AudioPlayer（→ 硬件SDK）
+  pipeline.py                           VoicePipeline — 管线编排（→ 机器人主控类）
+
+scripts/                              📜 脚本入口（薄层，只调 src/ 模块）
+  full_pipeline.py                     基础版：ASR → LLM → TTS
   full_pipeline_kws_sv.py              完整版：+唤醒词+声纹+对话记忆
   run_realtime.py                      实时打断版（VAD）
   test_ollama_pipeline.py              ASR + Ollama LLM 测试
@@ -55,22 +66,40 @@ docs/                                 📖 文档
 
 ## C++ 集成路线
 
-Python 脚本用于验证模型效果。最终机器人集成替换为：
+`src/` 下每个 Python 类直接对应一个 C++ 类，接口风格刻意参考 C++:
 
-| 模块 | Python（实验） | C++（集成） |
-|------|---------------|------------|
-| ASR | funasr SenseVoice | sherpa-onnx C API |
-| 唤醒词 | pypinyin 字符串匹配 | C++ 拼音表查找 |
-| 声纹 | modelscope CAM++ | sherpa-onnx speaker verification |
-| LLM | Ollama API | llama.cpp |
-| TTS | pyttsx3 | sherpa-onnx Kokoro |
-| 记忆 | ChatMemory 类 | std::vector<pair<string,string>> |
+| src/ 模块 | Python 类 | C++ 实现 |
+|-----------|----------|---------|
+| `asr.py` | `ASREngine` | sherpa-onnx SenseVoice C API |
+| `llm.py` | `LLMEngine` | llama.cpp |
+| `tts.py` | `TTSEngine` | sherpa-onnx Kokoro / espeak |
+| `kws.py` | `WakeWordDetector` | 拼音查找表 + 字符串匹配 |
+| `speaker.py` | `SpeakerVerifier` | sherpa-onnx speaker verification |
+| `memory.py` | `ChatMemory` | `std::vector<pair<string,string>>` |
+| `audio_io.py` | `AudioRecorder` / `AudioPlayer` | 机器人硬件 SDK |
+| `pipeline.py` | `VoicePipeline` | 机器人主控类 |
+| `config.py` | `PipelineConfig` | 配置结构体 |
+
+每个 `.py` 文件头部有 C++ 伪代码，可直接对照阅读。
 
 > Ollama 底层就是 llama.cpp，Python 和 C++ 共用同一个 GGUF 模型，推理效果一致。
 
 详见 [docs/LEARNING_ROADMAP.md](docs/LEARNING_ROADMAP.md)。
 
 ## 修改记录
+
+### 2026-07-02（续2）：模块化重构 — C++ 可读
+
+**问题**：所有逻辑散落在各脚本中，C++ 开发者难以对照理解。
+
+**修改**：
+1. 新增 `src/` 目录，8 个独立模块，每个对应一个 C++ 实现方向
+2. 每个 `.py` 文件头部写 C++ 伪代码，可直接对照阅读
+3. 所有模块用类封装，接口刻意按 C++ 风格设计（构造函数 → initialize → 方法调用）
+4. `VoicePipeline` 类统一编排，等价于机器人的主控类
+5. 脚本缩减为薄入口（~50 行），只负责打印菜单 + 调管线
+
+**结果**：`src/` 模块化 → C++ 开发者可逐文件对照实现。
 
 ### 2026-07-02：仓库规范化 & 精简
 

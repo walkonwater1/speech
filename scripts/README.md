@@ -1,6 +1,26 @@
-# 可用脚本
+# 脚本入口 & 模块说明
 
 所有脚本在 repo 根目录下运行。
+
+> 💡 功能逻辑已提取到 `src/` 目录，脚本只是薄入口。C++ 开发者直接看 `src/*.py`，
+> 每个文件头部有 C++ 伪代码对照。
+
+## 模块架构
+
+```
+src/
+├── config.py      PipelineConfig      — 所有配置一处改
+├── asr.py         ASREngine           — 语音识别 (→ sherpa-onnx)
+├── llm.py         LLMEngine           — 大模型推理 (→ llama.cpp)
+├── tts.py         TTSEngine           — 语音合成 (→ sherpa-onnx Kokoro)
+├── kws.py         WakeWordDetector    — 唤醒词检测 (→ 拼音表)
+├── speaker.py     SpeakerVerifier     — 声纹验证 (→ sherpa-onnx SV)
+├── memory.py      ChatMemory          — 对话记忆 (→ std::vector)
+├── audio_io.py    AudioRecorder/Player— 录音/播放 (→ 硬件SDK)
+└── pipeline.py    VoicePipeline       — 管线编排 (→ 机器人主控类)
+
+scripts/  ← 只负责 print 菜单 + 调 VoicePipeline
+```
 
 ## 核心脚本
 
