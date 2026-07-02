@@ -2,13 +2,18 @@
 
 基于 [ABexit/ASR-LLM-TTS](https://github.com/ABexit/ASR-LLM-TTS)，感谢原作者贡献。
 
-离线语音交互管线：**ASR（语音识别）→ LLM（大模型）→ TTS（语音合成）**。
+**语音交互管线：ASR → 唤醒词 → 声纹 → LLM → TTS → 播放**。
 
 ## 快速开始
 
 ```bash
 conda activate chatAudio
+
+# 基础版：语音/文字 → LLM → TTS
 python scripts/full_pipeline.py
+
+# 完整版：语音/文字 → 唤醒词 → 声纹 → LLM(带记忆) → TTS
+python scripts/full_pipeline_kws_sv.py
 ```
 
 打字聊天，或输入 `r` 录音对话。
@@ -16,22 +21,19 @@ python scripts/full_pipeline.py
 ## 目录结构
 
 ```
-scripts/                         ✅ 核心脚本（你只需要这里）
-  full_pipeline.py                一条龙：录音→ASR→LLM→TTS→播放
-  run_realtime.py                 实时打断版（VAD）
-  test_ollama_pipeline.py         ASR + Ollama LLM
-  test_pipeline.py                离线 ASR + Transformers LLM
+scripts/                              ✅ 核心脚本
+  full_pipeline.py                     基础版：录音→ASR→LLM→TTS
+  full_pipeline_kws_sv.py              完整版：+唤醒词+声纹+对话记忆
+  run_realtime.py                      实时打断版（VAD）
+  test_ollama_pipeline.py              ASR + Ollama LLM 测试
+  test_pipeline.py                     离线 ASR + Transformers LLM 测试
 
-archive/                         🗄️ 原始参考脚本
-  2_record_test.py                录音测试
-  5_pyttsx3_test.py               pyttsx3 TTS 测试
-  6_Inference_funasr.py           SenseVoice ASR 测试
+archive/                              🗄️ 原始参考脚本
+  2_record_test.py                     录音测试
+  5_pyttsx3_test.py                    pyttsx3 TTS 测试
+  6_Inference_funasr.py                SenseVoice ASR 测试
 
-docs/                            📖 文档
-  LEARNING_ROADMAP.md              C++ 集成学习路线
-  SESSION_RESUME.md                会话恢复指南
-  FAQ.md                           常见问题
-```
+docs/                                 📖 文档
 
 ## 环境
 
@@ -46,7 +48,9 @@ docs/                            📖 文档
 ## 数据流
 
 ```
-麦克风 → PCM → SenseVoice(ASR) → 文本 → Ollama(LLM) → 回复 → pyttsx3(TTS) → 播放
+麦克风 → PCM → SenseVoice(ASR) → 拼音匹配(唤醒词) → CAM++(声纹) → Ollama(LLM) → pyttsx3(TTS) → 播放
+                                                    ↑
+                                              ChatMemory(对话历史)
 ```
 
 ## C++ 集成路线
@@ -56,8 +60,11 @@ Python 脚本用于验证模型效果。最终机器人集成替换为：
 | 模块 | Python（实验） | C++（集成） |
 |------|---------------|------------|
 | ASR | funasr SenseVoice | sherpa-onnx C API |
+| 唤醒词 | pypinyin 字符串匹配 | C++ 拼音表查找 |
+| 声纹 | modelscope CAM++ | sherpa-onnx speaker verification |
 | LLM | Ollama API | llama.cpp |
 | TTS | pyttsx3 | sherpa-onnx Kokoro |
+| 记忆 | ChatMemory 类 | std::vector<pair<string,string>> |
 
 > Ollama 底层就是 llama.cpp，Python 和 C++ 共用同一个 GGUF 模型，推理效果一致。
 
@@ -93,7 +100,17 @@ Python 脚本用于验证模型效果。最终机器人集成替换为：
    - `docs/` — 文档集中管理
    - 修复 `cosyvoice/flow/flow_matching.py` 内嵌 Windows 路径
 
-**结果**：从 36 个 py 文件 + 10 个子目录 → 7 个 py 文件 + 3 个目录。只保留语音交互核心链路，可直接在 Linux CPU 环境运行。
+**结果**：从 36 个 py 文件 + 10 个子目录 → 8 个 py 文件 + 3 个目录。
+
+### 2026-07-02（续）：恢复唤醒词 + 声纹功能
+
+从 git 历史恢复 `15.1_SenceVoice_kws_CAM++.py`，适配 Linux：
+
+1. **修复路径**：Windows `E:\...` → Linux `~/pretrained_models/`
+2. **LLM 换 Ollama**：删除 transformers 本地加载，改用 `ollama.chat()`
+3. **TTS 换 pyttsx3**：删除 edge-tts（网络依赖），改用本地 pyttsx3
+4. **删除视频依赖**：去除 cv2、pyaudio，改用 sounddevice
+5. **新增 `full_pipeline_kws_sv.py`**：整合唤醒词+声纹+记忆+ASR+LLM+TTS
 
 ## 许可证
 
