@@ -79,16 +79,17 @@ install_deps() {
         pkgs+=("build-essential")
     fi
 
-    # 检查 espeak-ng
-    if ! ldconfig -p 2>/dev/null | grep -q libespeak-ng; then
-        if [ ! -f /usr/lib/x86_64-linux-gnu/libespeak-ng.so.1 ]; then
-            missing+=("espeak-ng")
-            pkgs+=("espeak-ng" "espeak-ng-data")
-        fi
+    # 检查 espeak-ng（直接查库文件，避免 ldconfig 非 root 无权限）
+    if [ ! -f /usr/lib/x86_64-linux-gnu/libespeak-ng.so.1 ] \
+       && [ ! -f /usr/lib/aarch64-linux-gnu/libespeak-ng.so.1 ]; then
+        missing+=("espeak-ng")
+        pkgs+=("espeak-ng" "espeak-ng-data")
     fi
 
-    # 检查 libcurl
-    if ! ldconfig -p 2>/dev/null | grep -q libcurl; then
+    # 检查 libcurl（pkg-config 优先，再查多架构头文件路径）
+    if ! pkg-config --exists libcurl 2>/dev/null \
+       && [ ! -f /usr/include/curl/curl.h ] \
+       && [ ! -f /usr/include/x86_64-linux-gnu/curl/curl.h ]; then
         missing+=("libcurl4")
         pkgs+=("libcurl4-openssl-dev")
     fi
