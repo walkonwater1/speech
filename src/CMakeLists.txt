@@ -31,6 +31,7 @@ set(SOURCES
     src/asr_engine.cpp
     src/speaker_verifier.cpp
     src/voice_pipeline.cpp
+    src/vad.cpp
 )
 
 set(HEADERS
@@ -43,6 +44,7 @@ set(HEADERS
     include/chat_memory.h
     include/audio_io.h
     include/voice_pipeline.h
+    include/vad.h
 )
 
 # ── 可执行文件 ────────────────────────────────────────
@@ -57,6 +59,7 @@ target_link_libraries(voice_pipeline PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
     ${ESPEAK_LIB}
+    pthread
 )
 
 # 如果有 sherpa-onnx

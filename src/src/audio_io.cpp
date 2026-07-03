@@ -20,6 +20,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 // ── AudioRecorder ────────────────────────────────────
 
@@ -113,4 +114,37 @@ bool AudioPlayer::play(const std::string& file_path)
     std::string cmd = "aplay -q " + file_path + " 2>/dev/null";
     int ret = std::system(cmd.c_str());
     return ret == 0;
+}
+
+pid_t AudioPlayer::play_async(const std::string& file_path)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        // 子进程: 重定向 stdin/stdout/stderr 到 /dev/null
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        execlp("aplay", "aplay", "-q", file_path.c_str(), nullptr);
+        _exit(1);
+    }
+    if (pid < 0) {
+        std::cerr << "   ❌ fork 播放进程失败" << std::endl;
+    }
+    return pid;
+}
+
+void AudioPlayer::stop_async(pid_t pid)
+{
+    if (pid <= 0) return;
+
+    // 发送 SIGTERM 终止 aplay 进程
+    kill(pid, SIGTERM);
+
+    // 非阻塞回收，避免僵尸进程
+    int status;
+    waitpid(pid, &status, WNOHANG);
 }

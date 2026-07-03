@@ -9,6 +9,7 @@
  */
 
 #include <string>
+#include <sys/types.h>
 
 class AudioRecorder {
 public:
@@ -30,6 +31,13 @@ private:
 
 class AudioPlayer {
 public:
-    /// 播放 WAV 文件 (阻塞到播放结束)
+    /// 播放 WAV 文件 (阻塞到播放结束，不可中断)
     static bool play(const std::string& file_path);
+
+    /// 异步播放 WAV 文件，返回子进程 PID
+    /// 持续监听模式下使用，可通过 stop_async() 打断
+    static pid_t play_async(const std::string& file_path);
+
+    /// 停止异步播放
+    static void stop_async(pid_t pid);
 };

@@ -4,16 +4,35 @@
  *
  * Python 对应: src/pipeline.py → VoicePipeline
  *
- * 这是你机器人主控类的参考实现，组装了全部模块：
+ * 两种模式:
+ *   - 单次模式 (现有):  process_text() / process_voice()
+ *   - 交互模式 (新增):  run_interactive() — 持续监听 + 语音打断
  *
- *   VoicePipeline pipeline(cfg);
- *   pipeline.initialize();
- *   pipeline.process_text("你好");
- *   pipeline.process_voice();   // 录音 → ASR → KWS → SV → LLM → TTS
+ * 交互模式架构:
+ *
+ *   ┌─ Capture 线程 ──────────────────────────────┐
+ *   │  arecord → 读音频帧 → VAD                   │
+ *   │    │                                         │
+ *   │    ├─ 检测到语音 且 正在播放 → 打断播放 🔴   │
+ *   │    ├─ 语音段结束 → 写入 WAV → push 到队列    │
+ *   │    └─ generation++  (旧推理结果作废)         │
+ *   └──────────────────────────────────────────────┘
+ *              │ queue
+ *   ┌─ Process 线程 ──────────────────────────────┐
+ *   │  pop 语音段 → ASR → KWS → LLM → TTS         │
+ *   │    │                                         │
+ *   │    ├─ 每步前检查 generation → 过期则丢弃     │
+ *   │    └─ play_async(aplay) → 等播放完成/被打断  │
+ *   └──────────────────────────────────────────────┘
  */
 
 #include <string>
 #include <memory>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 #include "config.h"
 #include "asr_engine.h"
@@ -23,6 +42,7 @@
 #include "speaker_verifier.h"
 #include "chat_memory.h"
 #include "audio_io.h"
+#include "vad.h"
 
 class VoicePipeline {
 public:
@@ -45,6 +65,14 @@ public:
     /// 清空对话记忆
     void clear_memory();
 
+    // ── 交互模式（可打断）─────────────────────────
+
+    /// 启动持续监听 + 语音打断模式（阻塞当前线程直到用户中断）
+    void run_interactive();
+
+    /// 停止交互模式（可从信号处理函数调用）
+    void stop_interactive();
+
 private:
     PipelineConfig cfg_;
 
@@ -58,6 +86,35 @@ private:
 
     bool initialized_ = false;
 
-    /// TTS 合成 + 播放
+    /// TTS 合成 + 播放（单次模式使用）
     void speak_and_play(const std::string& text);
+
+    // ── 交互模式内部状态 ─────────────────────────
+
+    std::atomic<bool> interactive_running_{false};
+    std::atomic<bool> is_playing_{false};
+    std::atomic<pid_t> player_pid_{-1};
+    std::atomic<int>   generation_{0};      // 每次新语音段 +1，推理线程检查是否过期
+
+    std::thread capture_thread_;
+    std::thread process_thread_;
+
+    // 语音段队列
+    std::mutex              queue_mutex_;
+    std::condition_variable queue_cv_;
+    struct Segment {
+        std::vector<float> samples;
+        int generation;
+    };
+    std::queue<Segment>     segment_queue_;
+
+    // ── 线程函数 ────────────────────────────────
+
+    void capture_loop();
+    void process_loop();
+
+    /// 将 float 样本写入 WAV 文件
+    static bool write_wav_float(const std::string& path,
+                                const std::vector<float>& samples,
+                                int sample_rate = 16000);
 };

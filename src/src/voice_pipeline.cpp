@@ -4,14 +4,29 @@
  * Python 对应: src/pipeline.py → VoicePipeline
  *
  * 数据流:
- *   文字:   prompt ──→ LLM ──→ TTS ──→ 播放 → 更新记忆
- *   语音:   麦克风 ──→ ASR ──→ KWS ──→ SV ──→ LLM ──→ TTS ──→ 播放
+ *   单次模式:
+ *     文字:   prompt ──→ LLM ──→ TTS ──→ 播放 → 更新记忆
+ *     语音:   麦克风 ──→ ASR ──→ KWS ──→ SV ──→ LLM ──→ TTS ──→ 播放
+ *
+ *   交互模式:
+ *     Capture 线程:  arecord → VAD → 语音段 → queue
+ *     Process 线程:  queue → ASR → KWS → LLM → TTS → 异步播放
+ *                    新语音到达时 → 打断播放 + generation++ → 旧结果丢弃
  */
 
 #include "voice_pipeline.h"
 
 #include <iostream>
 #include <cstdio>
+#include <cstring>
+#include <cstdint>
+#include <cstdlib>
+#include <fstream>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+// ── 构造 / 初始化 ────────────────────────────────────
 
 VoicePipeline::VoicePipeline(const PipelineConfig& cfg)
     : cfg_(cfg)
@@ -30,12 +45,10 @@ bool VoicePipeline::initialize()
 
     if (!asr_.initialize()) {
         std::cerr << "❌ ASR 初始化失败" << std::endl;
-        // 不 return false —— 允许降级运行（无 ASR）
     }
 
     if (!speaker_.initialize()) {
         std::cerr << "❌ 声纹模型初始化失败" << std::endl;
-        // 同上
     }
 
     if (!tts_.initialize()) {
@@ -43,7 +56,6 @@ bool VoicePipeline::initialize()
         return false;
     }
 
-    // 显示状态
     std::cout << "[4/4] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
@@ -60,28 +72,22 @@ bool VoicePipeline::initialize()
     return true;
 }
 
-// ── 文字输入 ─────────────────────────────────────────
+// ── 单次模式 ────────────────────────────────────────
 
 std::string VoicePipeline::process_text(const std::string& text)
 {
     if (!initialized_) return "";
 
-    // 1) LLM 推理（带对话记忆）
     std::string context = memory_.get_context();
     std::string reply = llm_.chat(text, context);
 
     if (reply.empty()) return "";
 
-    // 2) 更新记忆
     memory_.add(text, reply);
-
-    // 3) TTS + 播放
     speak_and_play(reply);
 
     return reply;
 }
-
-// ── 语音输入（完整链路）──────────────────────────────
 
 std::string VoicePipeline::process_voice()
 {
@@ -89,12 +95,10 @@ std::string VoicePipeline::process_voice()
 
     const std::string wav_file = "temp_recording.wav";
 
-    // 1) 录音
     if (!recorder_.record(wav_file)) {
         return "";
     }
 
-    // 2) ASR
     std::string prompt = asr_.transcribe(wav_file);
     if (prompt.empty()) {
         std::cout << "   ⚠️ 未识别到语音" << std::endl;
@@ -102,14 +106,12 @@ std::string VoicePipeline::process_voice()
         return "";
     }
 
-    // 3) 唤醒词检查
     if (!kws_.detect(prompt)) {
         speak_and_play("请说出正确的唤醒词");
         std::remove(wav_file.c_str());
         return "";
     }
 
-    // 4) 声纹验证
     if (!speaker_.has_enrolled()) {
         speak_and_play("请先注册声纹，输入 enroll 开始注册");
         std::remove(wav_file.c_str());
@@ -124,21 +126,15 @@ std::string VoicePipeline::process_voice()
 
     std::remove(wav_file.c_str());
 
-    // 5) LLM
     std::string context = memory_.get_context();
     std::string reply = llm_.chat(prompt, context);
     if (reply.empty()) return "";
 
-    // 6) 更新记忆
     memory_.add(prompt, reply);
-
-    // 7) TTS + 播放
     speak_and_play(reply);
 
     return reply;
 }
-
-// ── 声纹注册 ─────────────────────────────────────────
 
 bool VoicePipeline::enroll_speaker()
 {
@@ -157,8 +153,6 @@ bool VoicePipeline::enroll_speaker()
     return true;
 }
 
-// ── 工具 ─────────────────────────────────────────────
-
 void VoicePipeline::clear_memory()
 {
     memory_.clear();
@@ -174,4 +168,306 @@ void VoicePipeline::speak_and_play(const std::string& text)
         AudioPlayer::play(tts_file);
         std::remove(tts_file.c_str());
     }
+}
+
+// ── 交互模式（可打断）───────────────────────────────
+
+void VoicePipeline::run_interactive()
+{
+    if (!initialized_) {
+        std::cerr << "❌ 管线未初始化" << std::endl;
+        return;
+    }
+
+    // 避免僵尸进程
+    signal(SIGCHLD, SIG_IGN);
+
+    interactive_running_ = true;
+    is_playing_ = false;
+    player_pid_ = -1;
+    generation_ = 0;
+
+    // 清空队列
+    {
+        std::lock_guard<std::mutex> lk(queue_mutex_);
+        segment_queue_ = std::queue<Segment>();
+    }
+
+    std::cout << std::endl;
+    std::cout << "============================================================" << std::endl;
+    std::cout << "  🎤 交互模式已启动（支持语音打断）" << std::endl;
+    std::cout << "  直接说话即可交互，机器人说话时你可以随时打断" << std::endl;
+    std::cout << "  按 Ctrl+C 退出交互模式" << std::endl;
+    std::cout << "============================================================" << std::endl;
+    std::cout << std::endl;
+
+    // 启动两个工作线程
+    capture_thread_ = std::thread(&VoicePipeline::capture_loop, this);
+    process_thread_ = std::thread(&VoicePipeline::process_loop, this);
+
+    // 等待线程结束
+    if (capture_thread_.joinable())  capture_thread_.join();
+    if (process_thread_.joinable())  process_thread_.join();
+
+    std::cout << std::endl << "👋 交互模式已退出" << std::endl;
+}
+
+void VoicePipeline::stop_interactive()
+{
+    std::cout << "\n⏹️  收到停止信号..." << std::endl;
+    interactive_running_ = false;
+
+    // 停止当前播放
+    pid_t pid = player_pid_.load();
+    if (pid > 0) {
+        AudioPlayer::stop_async(pid);
+        player_pid_ = -1;
+    }
+
+    // 唤醒 process 线程使其退出
+    queue_cv_.notify_all();
+}
+
+// ── Capture 线程 ─────────────────────────────────────
+
+void VoicePipeline::capture_loop()
+{
+    // 打开 arecord 管道: 持续输出 raw 16-bit PCM
+    FILE* pipe = popen(
+        "arecord -f S16_LE -r 16000 -c 1 -t raw -q 2>/dev/null", "r");
+    if (!pipe) {
+        std::cerr << "❌ 无法启动录音设备" << std::endl;
+        interactive_running_ = false;
+        queue_cv_.notify_all();
+        return;
+    }
+
+    EnergyVAD vad;
+
+    const int frame_samples = 320;   // 20ms @16kHz
+    const int frame_bytes   = frame_samples * 2;  // int16 = 2 bytes
+
+    std::vector<int16_t> raw_buf(frame_samples);
+    std::vector<float>   float_buf(frame_samples);
+
+    std::cout << "🎙️  麦克风已开启，开始监听..." << std::endl;
+
+    while (interactive_running_) {
+        // 读一帧音频
+        size_t nread = fread(raw_buf.data(), 1, frame_bytes, pipe);
+        if (nread != (size_t)frame_bytes) {
+            if (interactive_running_) {
+                std::cerr << "⚠️ 录音读取异常" << std::endl;
+            }
+            break;
+        }
+
+        // int16 → float [-1, 1]
+        for (int i = 0; i < frame_samples; ++i) {
+            float_buf[i] = raw_buf[i] / 32768.0f;
+        }
+
+        // 持续喂预录音缓冲区
+        vad.feed_pre_buffer(float_buf.data(), frame_samples);
+
+        // VAD 处理
+        EnergyVAD::State vad_state = vad.process_frame(float_buf.data(), frame_samples);
+
+        // 🔴 打断：检测到语音开始 且 正在播放 → 立刻停止播放
+        if (vad_state == EnergyVAD::SPEECH_START && is_playing_.load()) {
+            pid_t pid = player_pid_.exchange(-1);
+            if (pid > 0) {
+                AudioPlayer::stop_async(pid);
+                std::cout << "\n🔴 检测到语音，已打断当前播放！" << std::endl;
+            }
+            is_playing_ = false;
+        }
+
+        // 语音段结束 → 入队
+        if (vad.segment_ready()) {
+            auto segment = vad.pop_segment();
+
+            // 检查最小长度：至少 0.5 秒
+            float duration = (float)segment.size() / 16000.0f;
+            if (duration < 0.5f) {
+                std::cout << "   ⏭️ 语音段太短 (" << duration << "s)，跳过" << std::endl;
+                continue;
+            }
+
+            int gen = generation_.fetch_add(1) + 1;
+            std::cout << "\n📝 捕获语音段 #" << gen
+                      << " (" << duration << "s)" << std::endl;
+
+            {
+                std::lock_guard<std::mutex> lk(queue_mutex_);
+                segment_queue_.push({std::move(segment), gen});
+            }
+            queue_cv_.notify_one();
+        }
+    }
+
+    pclose(pipe);
+
+    // 通知 process 线程退出
+    interactive_running_ = false;
+    queue_cv_.notify_all();
+}
+
+// ── Process 线程 ─────────────────────────────────────
+
+void VoicePipeline::process_loop()
+{
+    while (true) {
+        Segment seg;
+        {
+            std::unique_lock<std::mutex> lk(queue_mutex_);
+            queue_cv_.wait(lk, [this] {
+                return !segment_queue_.empty() || !interactive_running_;
+            });
+
+            if (!interactive_running_ && segment_queue_.empty()) {
+                break;  // 退出
+            }
+
+            seg = std::move(segment_queue_.front());
+            segment_queue_.pop();
+        }
+
+        int my_gen = seg.generation;
+
+        // 检查是否已有更新的语音段（当前段已过期）
+        if (my_gen < generation_.load()) {
+            std::cout << "   ⏭️ 语音段 #" << my_gen << " 已过期，丢弃" << std::endl;
+            continue;
+        }
+
+        // 1) 写入 WAV 文件
+        const std::string wav_file = "temp_interactive_" + std::to_string(my_gen) + ".wav";
+        if (!write_wav_float(wav_file, seg.samples, 16000)) {
+            std::cerr << "   ❌ 写入 WAV 失败" << std::endl;
+            continue;
+        }
+
+        // 2) ASR
+        std::string prompt = asr_.transcribe(wav_file);
+        std::remove(wav_file.c_str());
+
+        if (prompt.empty()) {
+            std::cout << "   ⚠️ 未识别到有效语音" << std::endl;
+            continue;
+        }
+
+        // 再次检查是否过期（ASR 可能耗时）
+        if (my_gen < generation_.load()) {
+            std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 ASR 后过期" << std::endl;
+            continue;
+        }
+
+        // 3) 唤醒词检查（可选的）
+        // 交互模式下默认跳过唤醒词检查（已经是全双工对话了）
+        // 如果配置了唤醒词且非空，仍然检查
+        if (kws_.enabled() && !kws_.detect(prompt)) {
+            std::cout << "   ⚠️ 未检测到唤醒词，跳过" << std::endl;
+            continue;
+        }
+
+        // 4) LLM
+        std::string context = memory_.get_context();
+        std::string reply = llm_.chat(prompt, context);
+
+        if (reply.empty()) continue;
+
+        // 再次检查是否过期（LLM 可能耗时较长）
+        if (my_gen < generation_.load()) {
+            std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 LLM 后过期，丢弃回复" << std::endl;
+            continue;
+        }
+
+        // 5) 更新记忆
+        memory_.add(prompt, reply);
+
+        // 6) TTS
+        const std::string tts_file = "temp_reply_interactive_" + std::to_string(my_gen) + ".wav";
+        if (!tts_.synthesize(reply, tts_file)) {
+            std::cerr << "   ❌ TTS 合成失败" << std::endl;
+            continue;
+        }
+
+        // 最后检查（TTS 后）
+        if (my_gen < generation_.load()) {
+            std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 TTS 后过期" << std::endl;
+            std::remove(tts_file.c_str());
+            continue;
+        }
+
+        // 7) 异步播放（可被打断）
+        std::cout << "   🔊 播放中..." << std::endl;
+        is_playing_ = true;
+        pid_t pid = AudioPlayer::play_async(tts_file);
+        player_pid_ = pid;
+
+        if (pid > 0) {
+            // 阻塞等待播放完成（或被 capture 线程 kill）
+            int status;
+            waitpid(pid, &status, 0);
+
+            // 清理：如果我们是正常播完的
+            pid_t expected = pid;
+            player_pid_.compare_exchange_strong(expected, -1);
+        }
+
+        is_playing_ = false;
+        std::remove(tts_file.c_str());
+    }
+}
+
+// ── WAV 写入工具 ──────────────────────────────────────
+
+bool VoicePipeline::write_wav_float(const std::string& path,
+                                     const std::vector<float>& samples,
+                                     int sample_rate)
+{
+    // float → int16
+    std::vector<int16_t> pcm(samples.size());
+    for (size_t i = 0; i < samples.size(); ++i) {
+        float s = samples[i];
+        if (s > 1.0f)  s = 1.0f;
+        if (s < -1.0f) s = -1.0f;
+        pcm[i] = (int16_t)(s * 32767.0f);
+    }
+
+    std::ofstream out(path, std::ios::binary);
+    if (!out) return false;
+
+    uint32_t data_size = (uint32_t)(pcm.size() * sizeof(int16_t));
+    uint32_t chunk_size = 36 + data_size;
+
+    // RIFF header
+    out.write("RIFF", 4);
+    out.write(reinterpret_cast<const char*>(&chunk_size), 4);
+    out.write("WAVE", 4);
+
+    // fmt chunk (16-bit PCM, mono)
+    out.write("fmt ", 4);
+    uint32_t fmt_size = 16;
+    uint16_t audio_format = 1;
+    uint16_t num_channels = 1;
+    uint16_t bits_per_sample = 16;
+    uint32_t byte_rate = sample_rate * num_channels * bits_per_sample / 8;
+    uint16_t block_align = num_channels * bits_per_sample / 8;
+
+    out.write(reinterpret_cast<const char*>(&fmt_size), 4);
+    out.write(reinterpret_cast<const char*>(&audio_format), 2);
+    out.write(reinterpret_cast<const char*>(&num_channels), 2);
+    out.write(reinterpret_cast<const char*>(&sample_rate), 4);
+    out.write(reinterpret_cast<const char*>(&byte_rate), 4);
+    out.write(reinterpret_cast<const char*>(&block_align), 2);
+    out.write(reinterpret_cast<const char*>(&bits_per_sample), 2);
+
+    // data chunk
+    out.write("data", 4);
+    out.write(reinterpret_cast<const char*>(&data_size), 4);
+    out.write(reinterpret_cast<const char*>(pcm.data()), data_size);
+
+    return true;
 }
