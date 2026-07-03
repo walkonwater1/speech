@@ -3,12 +3,15 @@
     "model_path": "src/third_party/sherpa-onnx/sense-voice-model"
   },
   "llm": {
-    "host": "http://127.0.0.1:11434",
-    "model": "qwen2.5:7b",
+    "host": "http://192.168.10.69:11434",
+    "model": "qwen2.5:0.5b",
     "system_prompt": "你叫小千，是一个18岁的女大学生，性格活泼开朗。回答简洁有趣，不超过50字。"
   },
   "tts": {
-    "rate": 200
+    "rate": 200,
+    "voice": "cmn+f3",
+    "backend": "piper",
+    "piper_model": "~/pretrained_models/piper/zh_CN/zh_CN-xiao_ya-medium.onnx"
   },
   "wake_word": {
     "keyword": ""

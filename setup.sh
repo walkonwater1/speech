@@ -305,8 +305,21 @@ run() {
     # 检查 Ollama 是否在运行
     if ! curl -s http://127.0.0.1:11434/api/tags &>/dev/null; then
         warn "Ollama 未运行，请先启动: ollama serve"
-        warn "如果未安装 Ollama: curl -fsSL https://ollama.com/install.sh | sh"
-        warn "然后拉取模型: ollama pull qwen2.5:1.5b"
+    fi
+
+    # 尝试自动激活 conda chatAudio 环境（Piper TTS 需要）
+    if [ -z "${CONDA_PREFIX:-}" ]; then
+        for conda_base in "${HOME}/miniconda3" "${HOME}/anaconda3" "/opt/conda"; do
+            if [ -f "${conda_base}/etc/profile.d/conda.sh" ]; then
+                info "自动激活 conda 环境: chatAudio"
+                source "${conda_base}/etc/profile.d/conda.sh"
+                conda activate chatAudio 2>/dev/null || {
+                    warn "conda 环境 chatAudio 不存在，Piper TTS 可能无法使用"
+                    warn "请手动创建: conda create -n chatAudio python=3.10 && conda activate chatAudio && pip install piper-tts"
+                }
+                break
+            fi
+        done
     fi
 
     exec "${BUILD_DIR}/voice_pipeline"

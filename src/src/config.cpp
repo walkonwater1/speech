@@ -65,7 +65,10 @@ bool PipelineConfig::load_from_file(const std::string& path)
 
     // ── TTS ────────────────────────────────────────
     if (j.contains("tts")) {
-        try_get(j["tts"], "rate", tts_rate);
+        try_get(j["tts"], "rate",       tts_rate);
+        try_get(j["tts"], "voice",      tts_voice);
+        try_get(j["tts"], "backend",    tts_backend);
+        try_get(j["tts"], "piper_model", piper_model_path);
     }
 
     // ── 唤醒词 ─────────────────────────────────────

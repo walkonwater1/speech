@@ -32,7 +32,7 @@ VoicePipeline::VoicePipeline(const PipelineConfig& cfg)
     : cfg_(cfg)
     , asr_(cfg.asr_model_path)
     , llm_(cfg.ollama_host, cfg.llm_model, cfg.system_prompt)
-    , tts_(cfg.tts_rate)
+    , tts_(cfg.tts_rate, cfg.tts_voice, cfg.tts_backend, cfg.piper_model_path)
     , kws_(cfg.wake_word)
     , speaker_(cfg.sv_enroll_dir, cfg.sv_threshold)
     , memory_(cfg.max_rounds, cfg.max_tokens)
@@ -161,12 +161,18 @@ void VoicePipeline::clear_memory()
 
 void VoicePipeline::speak_and_play(const std::string& text)
 {
-    const std::string tts_file = "temp_reply.wav";
+    std::cout << "   🔊 播放中..." << std::endl;
 
-    if (tts_.synthesize(text, tts_file)) {
-        std::cout << "   🔊 播放中..." << std::endl;
-        AudioPlayer::play(tts_file);
-        std::remove(tts_file.c_str());
+    if (cfg_.tts_backend == "piper") {
+        // Piper 流式管道：合成 + 播放一气呵成（边生成边播）
+        tts_.synthesize(text, "");
+    } else {
+        // espeak：先合成到 WAV，再播放
+        const std::string tts_file = "temp_reply.wav";
+        if (tts_.synthesize(text, tts_file)) {
+            AudioPlayer::play(tts_file);
+            std::remove(tts_file.c_str());
+        }
     }
 }
 
@@ -393,38 +399,43 @@ void VoicePipeline::process_loop()
         // 5) 更新记忆
         memory_.add(prompt, reply);
 
-        // 6) TTS
-        const std::string tts_file = "temp_reply_interactive_" + std::to_string(my_gen) + ".wav";
-        if (!tts_.synthesize(reply, tts_file)) {
-            std::cerr << "   ❌ TTS 合成失败" << std::endl;
-            continue;
-        }
+        // 6) TTS + 播放
+        if (cfg_.tts_backend == "piper") {
+            // Piper 流式管道：边合成边播，阻塞直到播完
+            std::cout << "   🔊 播放中..." << std::endl;
+            is_playing_ = true;
+            tts_.synthesize(reply, "");
+            is_playing_ = false;
+        } else {
+            const std::string tts_file = "temp_reply_interactive_" + std::to_string(my_gen) + ".wav";
+            if (!tts_.synthesize(reply, tts_file)) {
+                std::cerr << "   ❌ TTS 合成失败" << std::endl;
+                continue;
+            }
 
-        // 最后检查（TTS 后）
-        if (my_gen < generation_.load()) {
-            std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 TTS 后过期" << std::endl;
+            // 最后检查（TTS 后）
+            if (my_gen < generation_.load()) {
+                std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 TTS 后过期" << std::endl;
+                std::remove(tts_file.c_str());
+                continue;
+            }
+
+            // 7) 异步播放（可被打断）
+            std::cout << "   🔊 播放中..." << std::endl;
+            is_playing_ = true;
+            pid_t pid = AudioPlayer::play_async(tts_file);
+            player_pid_ = pid;
+
+            if (pid > 0) {
+                int status;
+                waitpid(pid, &status, 0);
+                pid_t expected = pid;
+                player_pid_.compare_exchange_strong(expected, -1);
+            }
+
+            is_playing_ = false;
             std::remove(tts_file.c_str());
-            continue;
         }
-
-        // 7) 异步播放（可被打断）
-        std::cout << "   🔊 播放中..." << std::endl;
-        is_playing_ = true;
-        pid_t pid = AudioPlayer::play_async(tts_file);
-        player_pid_ = pid;
-
-        if (pid > 0) {
-            // 阻塞等待播放完成（或被 capture 线程 kill）
-            int status;
-            waitpid(pid, &status, 0);
-
-            // 清理：如果我们是正常播完的
-            pid_t expected = pid;
-            player_pid_.compare_exchange_strong(expected, -1);
-        }
-
-        is_playing_ = false;
-        std::remove(tts_file.c_str());
     }
 }
 

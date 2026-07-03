@@ -111,7 +111,8 @@ float AudioRecorder::get_duration(const std::string& wav_path)
 
 bool AudioPlayer::play(const std::string& file_path)
 {
-    std::string cmd = "aplay -q " + file_path + " 2>/dev/null";
+    // 用 env -u 清除 conda 的 LD_LIBRARY_PATH，避免 ALSA 库冲突
+    std::string cmd = "env -u LD_LIBRARY_PATH aplay -q " + file_path + " 2>/dev/null";
     int ret = std::system(cmd.c_str());
     return ret == 0;
 }
@@ -120,6 +121,9 @@ pid_t AudioPlayer::play_async(const std::string& file_path)
 {
     pid_t pid = fork();
     if (pid == 0) {
+        // 清除 conda 环境变量，避免 ALSA 库冲突
+        unsetenv("LD_LIBRARY_PATH");
+
         // 子进程: 重定向 stdin/stdout/stderr 到 /dev/null
         int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {

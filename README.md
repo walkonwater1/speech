@@ -15,12 +15,82 @@
 ./setup.sh --clean      # 清理编译产物
 ```
 
-首次运行前确保已安装 Ollama 并拉取模型：
+### 运行前准备
 
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen2.5:1.5b
+# 1. 激活 conda 环境（Piper 神经网络 TTS 需要）
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate chatAudio
+
+# 2. NUC 上启动 Ollama（如果 LLM 部署在另一台机器则跳过）
+ollama serve
 ```
+
+### 运行
+
+```bash
+# 必须从项目根目录启动（模型路径使用相对路径）
+cd /path/to/ASR-LLM-TTS
+./setup.sh --run
+
+# 或者直接运行已编译的二进制
+./src/build/voice_pipeline
+```
+
+### 模型选择
+
+CPU only 设备（NUC / 无 GPU）推荐以下 Qwen2.5 模型：
+
+| 模型 | 大小 | 速度 | 质量 | 适用场景 |
+|------|------|------|------|---------|
+| `qwen2.5:0.5b` | 0.5GB | ⚡最快 | 简单对话 | 极限低延迟 |
+| `qwen2.5:1.5b` | 1GB | 很快 | 勉强能用 | 资源受限 |
+| `qwen2.5:3b` | 2GB | 快 | 日常够用 | 日常首选 |
+| `qwen2.5:7b` | 4.7GB | 中等 | 好 | 追求质量 |
+| `qwen2.5:14b` | 9GB | 慢 | 更好 | 32GB+ 内存可试 |
+
+```bash
+# 按需拉取，可同时安装多个切换对比
+ollama pull qwen2.5:3b   # 推荐：速度与质量平衡
+ollama pull qwen2.5:7b   # 质量更好
+ollama pull qwen2.5:0.5b # 速度最快
+```
+
+> **建议**：先从 `qwen2.5:3b` 开始，速度快且日常对话够用；追求更好回答质量再切到 `7b`。
+
+### TTS 后端配置
+
+`config.json` 中 `tts` 字段控制语音合成：
+
+```json
+"tts": {
+    "rate": 200,                           // 语速（仅 espeak）
+    "voice": "cmn+f3",                     // 音色（espeak）/ Piper 由模型决定
+    "backend": "piper",                    // "piper" 或 "espeak"
+    "piper_model": "~/pretrained_models/piper/zh_CN/zh_CN-xiao_ya-medium.onnx"
+}
+```
+
+| 后端 | 速度 | 音质 | 说明 |
+|------|------|------|------|
+| `piper` | ~0.04s 合成 | 自然女声（小雅） | 默认，pypinyin 词典快速模式 |
+| `espeak` | <0.01s | 电音/机械 | 纯 C++，无需 Python |
+
+Piper 后端使用 **常驻 Python 进程**（模型只加载一次），搭配 **pypinyin 词典拼音**（~5ms）替代 g2pw BERT 多音字消歧（~2s），实现接近 espeak 的响应速度 + 神经网络的自然音质。
+
+### 多机部署
+
+本项目支持 LLM 与 ASR/TTS 分离部署：
+
+```
+┌─ Desktop VM ─────────────────────┐      ┌─ NUC (192.168.10.69) ──┐
+│  ASR (SenseVoice)                │      │                         │
+│  TTS (Piper / espeak-ng)         │ LAN  │  Ollama (Qwen2.5)      │
+│  KWS + 声纹 + VAD                │─────▶│  HTTP API :11434       │
+│  VoicePipeline (管线编排)         │      │                         │
+└──────────────────────────────────┘      └─────────────────────────┘
+```
+
+修改 `config.json` 中 `llm.host` 指向 NUC IP 即可，LLM 推理延迟取决于模型大小和 NUC 负载。
 
 **必须在项目根目录运行**（模型路径使用相对路径）。
 
@@ -90,7 +160,7 @@ struct VADConfig {
 ### 单次模式（`r` / 文字输入）
 
 ```
-麦克风 → PCM → SenseVoice(ASR) → 拼音匹配(唤醒词) → CAM++(声纹) → Ollama(LLM) → espeak-ng(TTS) → 播放
+麦克风 → PCM → SenseVoice(ASR) → 拼音匹配(唤醒词) → CAM++(声纹) → Ollama(LLM) → Piper/espeak-ng(TTS) → 播放
                                                    ↑
                                              ChatMemory(对话历史)
 ```
@@ -122,7 +192,7 @@ src/
 │   ├── config.h                # PipelineConfig — 管线配置
 │   ├── asr_engine.h            # ASREngine — 语音识别（sherpa-onnx SenseVoice）
 │   ├── llm_engine.h            # LLMEngine — 大模型推理（Ollama HTTP）
-│   ├── tts_engine.h            # TTSEngine — 语音合成（espeak-ng）
+│   ├── tts_engine.h            # TTSEngine — 语音合成（Piper 神经网络 / espeak-ng 双后端）
 │   ├── wake_word.h             # WakeWordDetector — 唤醒词检测（拼音表）
 │   ├── speaker_verifier.h      # SpeakerVerifier — 声纹验证（sherpa-onnx CAM++）
 │   ├── chat_memory.h           # ChatMemory — 对话记忆
@@ -139,6 +209,7 @@ src/
 │   ├── audio_io.cpp
 │   ├── vad.cpp
 │   └── voice_pipeline.cpp
+├── piper_server.py              # Piper 常驻服务（pypinyin 快速模式）
 └── third_party/                # sherpa-onnx 库 + 模型（需手动下载）
 ```
 
@@ -147,13 +218,14 @@ src/
 | 组件 | 方案 | 说明 |
 |---|---|---|
 | ASR | SenseVoice Small int8 (~228MB) | sherpa-onnx C API |
-| LLM | Ollama (qwen2.5:1.5b) | 本地 HTTP 服务，llama.cpp 底层 |
-| TTS | espeak-ng | 系统库，完全离线 |
+| LLM | Ollama (Qwen2.5 系列) | HTTP API，支持跨机器部署，0.5b~14b |
+| TTS | Piper (xiaoya 女声) | pypinyin 快速模式 ~0.04s，常驻 Python 进程 |
+| TTS (备用) | espeak-ng | 系统库，完全离线，电音但 <0.01s |
 | VAD | 能量 RMS 阈值 | 纯 C++，无外部依赖 |
 | KWS | 400+ 汉字拼音表 | 纯 C++，无外部依赖 |
 | 声纹 | CAM++ (~27MB) | sherpa-onnx speaker embedding |
 | 音频 | ALSA (arecord/aplay) | Linux 原生 |
-| 硬件 | CPU only (i7-14700) | 无需 GPU |
+| 硬件 | CPU only | 无需 GPU |
 
 ## 许可证
 

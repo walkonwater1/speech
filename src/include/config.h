@@ -23,7 +23,10 @@ struct PipelineConfig {
     std::string system_prompt = "你叫小千，是一个18岁的女大学生，性格活泼开朗。回答简洁有趣，不超过50字。";
 
     // ── TTS ────────────────────────────────────────
-    int tts_rate = 200;   // espeak 语速 (词/分钟)
+    int         tts_rate         = 200;                           // espeak 语速 (词/分钟)
+    std::string tts_voice        = "cmn+f3";                      // espeak 音色
+    std::string tts_backend      = "piper";                       // "espeak" 或 "piper"
+    std::string piper_model_path = "~/pretrained_models/piper/zh_CN/zh_CN-xiao_ya-medium.onnx";
 
     // ── 唤醒词 ─────────────────────────────────────
     std::string wake_word = "zhan qi lai";   // 空字符串 = 关闭

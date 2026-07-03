@@ -1,32 +1,61 @@
 #pragma once
 /**
- * 语音合成引擎 (TTS)
+ * 语音合成引擎 (TTS) — 双后端
+ *
+ * - espeak: libespeak-ng 直接调用
+ * - piper:  神经网络 TTS，常驻 Python 进程（模型只加载一次）
  *
  * Python 对应: src/tts.py → TTSEngine
- * 依赖:      libespeak-ng (系统库)
- *
- * 备选:  sherpa-onnx Kokoro TTS (音质更好，需额外模型)
  */
 
 #include <string>
+#include <cstdio>
 
 class TTSEngine {
 public:
-    explicit TTSEngine(int rate = 200);
+    /// @param rate        espeak 语速
+    /// @param voice       espeak 音色
+    /// @param backend     "espeak" 或 "piper"
+    /// @param piper_model Piper 模型路径 (.onnx)
+    explicit TTSEngine(int rate = 200,
+                       const std::string& voice = "cmn+f3",
+                       const std::string& backend = "espeak",
+                       const std::string& piper_model = "");
     ~TTSEngine();
 
     TTSEngine(const TTSEngine&) = delete;
     TTSEngine& operator=(const TTSEngine&) = delete;
 
-    /// 初始化 espeak
+    /// 初始化（Piper 后端会预加载模型）
     bool initialize();
 
-    /// 文字 → WAV 文件
+    /// 文字 → 音频播放
     /// @param text        待合成文本 (UTF-8)
-    /// @param output_path 输出 WAV 路径
+    /// @param output_path 输出 WAV 路径（espeak 后端使用，Piper 忽略）
     bool synthesize(const std::string& text, const std::string& output_path);
 
 private:
     int rate_;
+    std::string voice_;
+    std::string backend_;
+    std::string piper_model_;
+    std::string piper_script_;
     bool initialized_ = false;
+
+    // Piper 常驻进程
+    FILE* piper_in_  = nullptr;   // 写文本到 Python 进程
+    FILE* piper_out_ = nullptr;   // 读 PCM 数据
+    int piper_sample_rate_ = 22050;
+
+    // espeak
+    bool init_espeak();
+    bool synthesize_espeak(const std::string& text, const std::string& output_path);
+
+    // piper
+    bool init_piper();
+    bool synthesize_piper(const std::string& text, const std::string& output_path);
+    void shutdown_piper();
+
+    /// 从 piper_out_ 读取指定长度数据
+    bool read_exact(void* buf, size_t len);
 };
