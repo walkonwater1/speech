@@ -51,8 +51,14 @@ int main(int /*argc*/, char** /*argv*/)
 {
     // ── 配置 ──────────────────────────────────────────
     PipelineConfig cfg;
-    cfg.wake_word = "";                // 交互模式下唤醒词可选，"" 关闭
-    cfg.llm_model = "qwen2.5:1.5b";   // Ollama 模型
+
+    // 1) 尝试自动加载 config.json（当前目录 → 环境变量）
+    std::string config_path = PipelineConfig::auto_load_path();
+    if (!config_path.empty() && cfg.load_from_file(config_path)) {
+        std::cout << "📄 已加载配置: " << config_path << std::endl;
+    } else {
+        std::cout << "ℹ️  未找到 config.json，使用默认配置" << std::endl;
+    }
 
     // ── 初始化 ────────────────────────────────────────
     VoicePipeline pipeline(cfg);

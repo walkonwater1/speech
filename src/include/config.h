@@ -2,6 +2,12 @@
 /**
  * 管线配置结构体
  *
+ * 支持两种配置方式：
+ *   1. 代码直接赋值 — PipelineConfig cfg; cfg.llm_model = "...";
+ *   2. JSON 配置文件 — cfg.load_from_file("config.json");
+ *
+ * JSON 配置文件格式见项目根目录 config.json。
+ *
  * Python 对应: src/config.py → PipelineConfig
  */
 
@@ -9,7 +15,6 @@
 
 struct PipelineConfig {
     // ── ASR ────────────────────────────────────────
-    /// sherpa-onnx SenseVoice 模型路径
     std::string asr_model_path = "src/third_party/sherpa-onnx/sense-voice-model";
 
     // ── LLM ────────────────────────────────────────
@@ -21,19 +26,32 @@ struct PipelineConfig {
     int tts_rate = 200;   // espeak 语速 (词/分钟)
 
     // ── 唤醒词 ─────────────────────────────────────
-    /// 拼音字符串，空 = 关闭
-    std::string wake_word = "zhan qi lai";
+    std::string wake_word = "zhan qi lai";   // 空字符串 = 关闭
 
     // ── 声纹验证 ───────────────────────────────────
-    /// 注册音频目录
     std::string sv_enroll_dir = "speaker_voice";
-    /// 相似度阈值 (越低越严格)
-    float sv_threshold = 0.35f;
+    float       sv_threshold  = 0.35f;       // 相似度阈值 (越低越严格)
 
     // ── 音频 ───────────────────────────────────────
     int sample_rate = 16000;
 
+    // ── VAD（语音活动检测 / 打断灵敏度）─────────────
+    float vad_energy_threshold   = 0.003f;   // RMS 阈值，越大越不敏感
+    int   vad_min_speech_frames  = 8;        // 最小语音帧数 (~160ms)
+    int   vad_min_silence_frames = 30;       // 静音多少帧后判结束 (~600ms)
+    int   vad_pre_speech_frames  = 15;       // 语音开始前保留帧数 (~300ms)
+
     // ── 对话记忆 ───────────────────────────────────
     int max_rounds = 10;
     int max_tokens = 512;
+
+    // ── 文件加载 ───────────────────────────────────
+
+    /// 从 JSON 文件加载配置（未出现在文件中的键保持默认值）
+    /// @return true 加载成功，false 文件不存在或格式错误（回退到默认值）
+    bool load_from_file(const std::string& path);
+
+    /// 智能查找配置文件：当前目录 → 上级目录 → 环境变量
+    /// @return 实际加载的文件路径，空 = 未找到（使用纯默认值）
+    static std::string auto_load_path();
 };

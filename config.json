@@ -1,0 +1,33 @@
+{
+  "asr": {
+    "model_path": "src/third_party/sherpa-onnx/sense-voice-model"
+  },
+  "llm": {
+    "host": "http://127.0.0.1:11434",
+    "model": "qwen2.5:7b",
+    "system_prompt": "你叫小千，是一个18岁的女大学生，性格活泼开朗。回答简洁有趣，不超过50字。"
+  },
+  "tts": {
+    "rate": 200
+  },
+  "wake_word": {
+    "keyword": ""
+  },
+  "speaker_verification": {
+    "enroll_dir": "speaker_voice",
+    "threshold": 0.35
+  },
+  "audio": {
+    "sample_rate": 16000
+  },
+  "vad": {
+    "energy_threshold": 0.003,
+    "min_speech_frames": 8,
+    "min_silence_frames": 30,
+    "pre_speech_frames": 15
+  },
+  "memory": {
+    "max_rounds": 10,
+    "max_tokens": 512
+  }
+}

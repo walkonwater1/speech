@@ -242,9 +242,16 @@ void VoicePipeline::capture_loop()
         return;
     }
 
-    EnergyVAD vad;
+    // 从 PipelineConfig 构造 VAD 配置
+    VADConfig vad_cfg;
+    vad_cfg.energy_threshold   = cfg_.vad_energy_threshold;
+    vad_cfg.min_speech_frames  = cfg_.vad_min_speech_frames;
+    vad_cfg.min_silence_frames = cfg_.vad_min_silence_frames;
+    vad_cfg.pre_speech_frames  = cfg_.vad_pre_speech_frames;
 
-    const int frame_samples = 320;   // 20ms @16kHz
+    EnergyVAD vad(vad_cfg);
+
+    const int frame_samples = vad_cfg.frame_size_samples;   // 20ms @16kHz
     const int frame_bytes   = frame_samples * 2;  // int16 = 2 bytes
 
     std::vector<int16_t> raw_buf(frame_samples);

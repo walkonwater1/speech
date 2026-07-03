@@ -32,6 +32,7 @@ set(SOURCES
     src/speaker_verifier.cpp
     src/voice_pipeline.cpp
     src/vad.cpp
+    src/config.cpp
 )
 
 set(HEADERS
