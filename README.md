@@ -227,6 +227,128 @@ src/
 | 音频 | ALSA (arecord/aplay) | Linux 原生 |
 | 硬件 | CPU only | 无需 GPU |
 
+## 优化路线图
+
+> 当前状态：Demo 阶段，功能跑通，但离嵌入式板卡部署尚有差距。
+
+---
+
+### P0 — 上板前必须解决
+
+#### 1. 音频 I/O 去 shell 化
+
+**现状**：`popen("arecord ...")` / `popen("aplay ...")` 调系统命令，fork 子进程，延迟不可控。需要反复 `unsetenv("LD_LIBRARY_PATH")` 规避 conda 库冲突。
+
+**目标**：
+- 直接调用 ALSA C API（`snd_pcm_open` / `snd_pcm_readi` / `snd_pcm_writei`），去掉 arecord/aplay
+- `AudioRecorder` / `AudioPlayer` 抽象为接口，支持注入不同底层实现（板载麦克风 SDK）
+- 添加音频预处理链：**AGC（自动增益控制）+ 降噪 + 回声消除**
+
+#### 2. VAD 升级到 ML 方案
+
+**现状**：`EnergyVAD` 只算 RMS 功率 + 固定阈值（`energy_threshold=0.003`），真实环境中风扇、空调、旁人说话都可能导致误触发或漏检。
+
+**目标**：
+- 替换为 **WebRTC VAD**（GMM 模型，极轻量，纯 C 嵌入）或 **Silero VAD**（ONNX，~1MB）
+- 添加动态噪声门限自适应（前 N 帧 RMS 均值作为基线 + 在线更新）
+
+#### 3. 错误恢复与看门狗
+
+**现状**：各模块出错只打 `std::cerr` + `return false`，无统一错误恢复策略。Ollama 超时/挂掉整条管线卡死。
+
+**目标**：
+- 每个模块加超时 + 重试机制
+- Ollama 加 health check，挂了给用户语音提示
+- 看门狗线程监控 capture/process 线程健康，异常自动重启
+- 磁盘空间检测，临时文件写 `tmpfs`，避免磨损 SD 卡
+
+---
+
+### P1 — 显著提升体验
+
+#### 4. 音频级唤醒词（KWS）
+
+**现状**：400 个硬编码汉字的拼音查表，ASR 识别出文字后再做子串匹配。ASR 识别错一个字唤醒就失败。
+
+**目标**：
+- 用 **sherpa-onnx-kws** 直接在音频层面做唤醒，不需要先过 ASR
+- 两级策略：音频唤醒（高灵敏度）→ ASR 确认（低误触发）
+- 覆盖常见汉字（目前 400 字 → 3500+ 常用字），改用 pypinyin 动态查表或用开源拼音字典
+
+#### 5. LLM 流式输出 + 句子级 TTS 流水线
+
+**现状**：`"stream": false`，等 LLM 全部生成完再送 TTS，首字延迟 = LLM 总时间 + TTS 合成时间。
+
+**目标**：
+- LLM 端改为 `"stream": true`，libcurl 流式回调逐句吐文本
+- TTS 端做**句子切分**：LLM 出一个句子 → 立刻送 Piper 合成播放 → LLM 继续生成下一句
+- 探索支持原生流式输入的 TTS 引擎
+
+#### 6. 音频预处理
+
+**现状**：原始 PCM 直接送 ASR/VAD，无任何前端处理。
+
+**目标**：
+- AGC（自动增益）：近讲/远讲音量自适应
+- 单通道降噪（如 RNNoise）：抑制风扇/空调稳态噪声
+- 回声消除（如果板子同时播放和录音）
+
+---
+
+### P2 — 锦上添花
+
+#### 7. 去 Python 依赖（Piper C++ 直调）
+
+**现状**：fork Python 子进程跑 `piper-tts` 库，嵌入式上 Python 运行时 + piper 依赖 ≈ 几百 MB 内存。
+
+**目标**：
+- Piper 底层是 C++，探索直接调用 Piper C++ API 加载 ONNX 模型
+- 砍掉 Python/conda 依赖，最终产物：一个静态链接的二进制
+
+#### 8. 对话体验增强
+
+| 方面 | 目标 |
+|------|------|
+| **TTS 表现力** | 多音色支持、语速/音调可调，SSML 标记控制停顿 |
+| **对话记忆** | 从简单文本拼接升级到语义记忆（向量数据库存关键事实） |
+| **多轮澄清** | 歧义时主动追问："你说的是 A 还是 B？" |
+| **音效反馈** | 唤醒成功播放短促提示音，让用户确认 |
+| **多场景人格** | 可切换 system prompt（陪聊/教学/设备控制等） |
+
+#### 9. 工程化部署
+
+| 方面 | 目标 |
+|------|------|
+| **进程管理** | systemd service，开机自启，挂了自动拉起 |
+| **路径规范** | 安装根目录 `/opt/voice_pipeline/`，配置放 `/etc/voice_pipeline/` |
+| **日志系统** | spdlog 或 syslog，带时间戳、级别、轮转 |
+| **编译打包** | CMake install target + `.deb` 包 / Docker 镜像 |
+| **远程管理** | HTTP API 或 MQTT 通道，远程下发配置、查看运行状态、OTA 升级 |
+| **资源监控** | CPU/内存/磁盘用量上报，异常告警 |
+
+---
+
+### 优先级总览
+
+```
+P0（上板前必须）:
+  ├─ 音频 I/O 走 ALSA C API，去掉 arecord/aplay shell 调用
+  ├─ VAD 换 ML 方案（WebRTC VAD / Silero VAD）
+  └─ 错误恢复 + 看门狗
+
+P1（显著提升体验）:
+  ├─ 音频级唤醒词（sherpa-onnx-kws）
+  ├─ LLM streaming + 句子级 TTS 流水线
+  └─ 音频预处理（AGC + 降噪）
+
+P2（锦上添花）:
+  ├─ Piper C++ 直调，去 Python/conda
+  ├─ 对话体验增强（多音色/情感/提示音）
+  └─ 工程化部署（systemd/日志/打包/远程管理）
+```
+
+---
+
 ## 许可证
 
 Apache 2.0.
