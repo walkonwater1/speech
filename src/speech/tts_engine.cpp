@@ -209,72 +209,55 @@ static std::string ensure_ending_punctuation(const std::string& text)
 /// 在逗号过少的长句中插入逗号改善停顿
 static std::string add_breathing_pauses(const std::string& text)
 {
-    // 统计是否已有足够的标点
-    // 中文标点 UTF-8 序列: ，=E3 80 82, 。=E3 80 81, ！=EF BC 81, ？=EF BC 9F
+    // 中文标点 UTF-8 序列
     auto is_cn_punct = [](const char* p) -> bool {
         unsigned char a = p[0], b = p[1], c = p[2];
-        // E3 80 82 = 。
         if (a == 0xE3 && b == 0x80) return (c == 0x82 || c == 0x81); // 。，
-        // EF BC 81 = ！, EF BC 9F = ？, EF BC 8C = ，, EF BC 9B = ；
-        if (a == 0xEF && b == 0xBC) return (c == 0x81 || c == 0x9F || c == 0x8C || c == 0x9B);
+        if (a == 0xEF && b == 0xBC) return (c == 0x81 || c == 0x9F || c == 0x8C || c == 0x9B); // ！？，；
         return false;
     };
 
-    int punct_count = 0;
-    size_t char_count = 0;
+    // 遍历文本，每 ~12 个汉字后如果是连续汉字无标点，插入逗号
+    std::string result;
+    result.reserve(text.size() + text.size() / 10);
+
+    size_t chars_since_pause = 0;  // 距离上次停顿的汉字数
 
     for (size_t i = 0; i < text.size(); ) {
         unsigned char c = static_cast<unsigned char>(text[i]);
-        if (c >= 0xE0 && i + 2 < text.size()) {
-            // 3-byte UTF-8 (most CJK)
+        size_t char_bytes = 1;
+        if (c >= 0xF0 && i + 3 < text.size()) char_bytes = 4;
+        else if (c >= 0xE0 && i + 2 < text.size()) char_bytes = 3;
+        else if (c >= 0xC0 && i + 1 < text.size()) char_bytes = 2;
+
+        if (char_bytes >= 3) {
+            // 中文标点 → 重置计数器
             if (is_cn_punct(&text[i])) {
-                ++punct_count;
+                chars_since_pause = 0;
+            } else {
+                ++chars_since_pause;
             }
-            ++char_count;
-            i += 3;
-        } else if (c >= 0xF0 && i + 3 < text.size()) {
-            ++char_count;
-            i += 4;
-        } else if (c >= 0xC0 && i + 1 < text.size()) {
-            ++char_count;
-            i += 2;
-        } else {
-            if (c == ',' || c == '.' || c == '!' || c == '?') ++punct_count;
-            ++i;
+        } else if (c == ',' || c == '.' || c == '!' || c == '?') {
+            // ASCII 标点 → 重置
+            chars_since_pause = 0;
+        }
+        // ASCII 字符不增加汉字计数
+
+        result.append(text, i, char_bytes);
+        i += char_bytes;
+
+        // 每 12 个汉字无标点时插入逗号（在非标点位置之后）
+        if (chars_since_pause >= 12 && i < text.size()) {
+            unsigned char nc = static_cast<unsigned char>(text[i]);
+            // 确保后一个字符不是标点，也不是英文
+            if (nc >= 0x80 || nc == ' ') {
+                result += "\xEF\xBC\x8C"; // UTF-8 逗号 ，
+                chars_since_pause = 0;     // 重置计数器
+            }
         }
     }
 
-    // 如果汉字 > 30 且标点 < 2 个，说明几乎没有停顿
-    if (char_count > 30 && punct_count < 2) {
-        std::string result;
-        result.reserve(text.size() + 10);
-        size_t ch_count = 0;
-        bool inserted = false;
-
-        for (size_t i = 0; i < text.size(); ) {
-            unsigned char c = static_cast<unsigned char>(text[i]);
-            size_t char_bytes = 1;
-            if (c >= 0xE0 && i + 2 < text.size()) char_bytes = 3;
-            else if (c >= 0xF0 && i + 3 < text.size()) char_bytes = 4;
-            else if (c >= 0xC0 && i + 1 < text.size()) char_bytes = 2;
-
-            if (char_bytes >= 3) ++ch_count;
-
-            result.append(text, i, char_bytes);
-            i += char_bytes;
-
-            if (!inserted && ch_count >= 15 && ch_count + 5 < char_count && i < text.size()) {
-                unsigned char nc = static_cast<unsigned char>(text[i]);
-                if (nc >= 0x80 || nc == ' ') {
-                    result += "\xEF\xBC\x8C"; // UTF-8 逗号 ，
-                    inserted = true;
-                }
-            }
-        }
-        return result;
-    }
-
-    return text;
+    return result;
 }
 
 /// 综合预处理
