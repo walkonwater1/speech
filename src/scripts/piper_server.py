@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Piper TTS 常驻服务（快速模式）— 用 pypinyin 替代 g2pw。
+Piper TTS 常驻服务。
 
-g2pw 用 BERT 做多音字消歧（~2s），pypinyin 用词典（~5ms）。
-日常对话中少量多音字发音偏差可接受，速度提升 ~100 倍。
+支持两种音素转换模式，通过环境变量 PIPER_PHONEME_MODE 切换：
+  - fast (默认): pypinyin 词典模式（~5ms），速度快但多音字可能不准
+  - accurate:     g2pw BERT 模式（~2s），多音字消歧精准
 
 格式:
   请求: 文本\n
@@ -17,6 +18,8 @@ import json
 import re
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
+PHONEME_MODE = os.environ.get("PIPER_PHONEME_MODE", "fast")
 
 # ── 从 Piper 复用常量 ───────────────────────────────
 
@@ -122,15 +125,20 @@ def main():
 
     voice = piper.PiperVoice.load(model_path)
 
-    # Monkey-patch: 替换 ChinesePhonemizer
-    class FastChinesePhonemizer:
-        def __init__(self, download_dir=None):
-            pass
+    if PHONEME_MODE == "accurate":
+        # 使用 Piper 原生的 g2pw ChinesePhonemizer（精准但慢）
+        print("[piper_server] Phoneme mode: g2pw (accurate)", file=sys.stderr, flush=True)
+    else:
+        # Monkey-patch: 替换为快速 pypinyin 模式
+        class FastChinesePhonemizer:
+            def __init__(self, download_dir=None):
+                pass
 
-        def phonemize(self, text):
-            return fast_phonemize(text)
+            def phonemize(self, text):
+                return fast_phonemize(text)
 
-    pc.ChinesePhonemizer = FastChinesePhonemizer
+        pc.ChinesePhonemizer = FastChinesePhonemizer
+        print("[piper_server] Phoneme mode: pypinyin (fast)", file=sys.stderr, flush=True)
 
     sample_rate = voice.config.sample_rate
     meta = {"sample_rate": sample_rate, "sample_width": 2, "channels": 1}

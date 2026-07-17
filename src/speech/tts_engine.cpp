@@ -584,6 +584,12 @@ bool TTSEngine::init_piper()
         unsetenv("LD_LIBRARY_PATH");
         setenv("HF_ENDPOINT", "https://hf-mirror.com", 1);
 
+        // 传递音素模式环境变量
+        const char* phoneme_mode = std::getenv("PIPER_PHONEME_MODE");
+        if (phoneme_mode && phoneme_mode[0]) {
+            setenv("PIPER_PHONEME_MODE", phoneme_mode, 1);
+        }
+
         execlp(python.c_str(), python.c_str(), "-u",
                piper_script_.c_str(), piper_model_.c_str(), nullptr);
         _exit(1);
