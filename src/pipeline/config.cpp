@@ -104,6 +104,25 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(m, "max_tokens", max_tokens);
     }
 
+    // ── 技能 ────────────────────────────────────────
+    if (j.contains("skills")) {
+        auto& s = j["skills"];
+        if (s.contains("weather")) {
+            try_get(s["weather"], "enabled", skill_weather);
+        }
+        if (s.contains("time")) {
+            try_get(s["time"], "enabled", skill_time);
+        }
+        if (s.contains("web_search")) {
+            try_get(s["web_search"], "enabled", skill_web_search);
+        }
+        if (s.contains("rag")) {
+            auto& r = s["rag"];
+            try_get(r, "enabled",  skill_rag);
+            try_get(r, "docs_dir", rag_docs_dir);
+        }
+    }
+
     return true;
 }
 

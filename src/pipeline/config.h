@@ -48,6 +48,13 @@ struct PipelineConfig {
     int max_rounds = 10;
     int max_tokens = 512;
 
+    // ── 技能 ───────────────────────────────────────
+    bool skill_weather    = true;
+    bool skill_time       = true;
+    bool skill_web_search = false;
+    bool skill_rag        = false;
+    std::string rag_docs_dir = "knowledge_base";
+
     // ── 文件加载 ───────────────────────────────────
 
     /// 从 JSON 文件加载配置（未出现在文件中的键保持默认值）

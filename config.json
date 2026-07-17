@@ -32,5 +32,11 @@
   "memory": {
     "max_rounds": 10,
     "max_tokens": 512
+  },
+  "skills": {
+    "weather": { "enabled": true },
+    "time": { "enabled": true },
+    "web_search": { "enabled": false },
+    "rag": { "enabled": false, "docs_dir": "knowledge_base" }
   }
 }

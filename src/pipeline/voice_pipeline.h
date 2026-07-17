@@ -43,6 +43,7 @@
 #include "chat_memory.h"
 #include "audio_io.h"
 #include "vad.h"
+#include "skill_manager.h"
 
 class VoicePipeline {
 public:
@@ -82,6 +83,7 @@ private:
     WakeWordDetector  kws_;
     SpeakerVerifier   speaker_;
     ChatMemory        memory_;
+    SkillManager      skill_mgr_;
     AudioRecorder     recorder_;
 
     bool initialized_ = false;

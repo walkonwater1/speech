@@ -19,9 +19,11 @@ public:
     /// 发消息给 LLM，获取回复
     /// @param user_message     当前用户消息
     /// @param history_context  历史对话上下文（可选）
+    /// @param extra_context    额外上下文（技能结果/系统信息等，注入到用户消息之前）
     /// @return LLM 回复文本
     std::string chat(const std::string& user_message,
-                     const std::string& history_context = "");
+                     const std::string& history_context = "",
+                     const std::string& extra_context = "");
 
 private:
     std::string host_;           // Ollama 服务地址

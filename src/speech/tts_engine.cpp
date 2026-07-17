@@ -91,8 +91,9 @@ static bool file_exists(const std::string& path)
 
 static std::string find_script(const std::string& name)
 {
-    std::string prefixed = "src/" + name;
-    const char* all[] = { name.c_str(), prefixed.c_str(), nullptr };
+    std::string src_prefix   = "src/" + name;
+    std::string scripts_path = "src/scripts/" + name;
+    const char* all[] = { name.c_str(), src_prefix.c_str(), scripts_path.c_str(), nullptr };
 
     for (int i = 0; all[i]; ++i) {
         if (file_exists(all[i])) return all[i];

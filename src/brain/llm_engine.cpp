@@ -107,14 +107,20 @@ LLMEngine::LLMEngine(const std::string& host,
 {}
 
 std::string LLMEngine::chat(const std::string& user_message,
-                            const std::string& history_context)
+                            const std::string& history_context,
+                            const std::string& extra_context)
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    // 拼接 prompt
-    std::string prompt = user_message;
+    // 拼接 prompt: [额外上下文] + [历史] + [当前用户消息]
+    std::string prompt;
+    if (!extra_context.empty()) {
+        prompt += "[系统信息]\n" + extra_context + "\n\n";
+    }
+    prompt += "[用户消息]\n" + user_message;
+
     if (!history_context.empty()) {
-        prompt = history_context + "\nUser: " + user_message + "\nAssistant:";
+        prompt = history_context + "\nUser: " + prompt + "\nAssistant:";
     }
 
     // 构造 JSON 请求体

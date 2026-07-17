@@ -37,7 +37,12 @@ VoicePipeline::VoicePipeline(const PipelineConfig& cfg)
     , speaker_(cfg.sv_enroll_dir, cfg.sv_threshold)
     , memory_(cfg.max_rounds, cfg.max_tokens)
     , recorder_(cfg.sample_rate)
-{}
+{
+    // 根据配置启用/禁用技能
+    skill_mgr_.set_enabled("weather",    cfg.skill_weather);
+    skill_mgr_.set_enabled("time",       cfg.skill_time);
+    skill_mgr_.set_enabled("web_search", cfg.skill_web_search);
+}
 
 bool VoicePipeline::initialize()
 {
@@ -78,8 +83,16 @@ std::string VoicePipeline::process_text(const std::string& text)
 {
     if (!initialized_) return "";
 
+    // 技能检测
+    SkillResult sr = skill_mgr_.detect_and_execute(text);
+    std::string extra = SkillManager::get_system_context();
+    if (sr.hit) {
+        extra += "\n" + sr.result_text;
+        std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+    }
+
     std::string context = memory_.get_context();
-    std::string reply = llm_.chat(text, context);
+    std::string reply = llm_.chat(text, context, extra);
 
     if (reply.empty()) return "";
 
@@ -126,8 +139,16 @@ std::string VoicePipeline::process_voice()
 
     std::remove(wav_file.c_str());
 
+    // 技能检测
+    SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+    std::string extra = SkillManager::get_system_context();
+    if (sr.hit) {
+        extra += "\n" + sr.result_text;
+        std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+    }
+
     std::string context = memory_.get_context();
-    std::string reply = llm_.chat(prompt, context);
+    std::string reply = llm_.chat(prompt, context, extra);
     if (reply.empty()) return "";
 
     memory_.add(prompt, reply);
@@ -384,9 +405,17 @@ void VoicePipeline::process_loop()
             continue;
         }
 
-        // 4) LLM
+        // 4) 技能检测
+        SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+        std::string extra = SkillManager::get_system_context();
+        if (sr.hit) {
+            extra += "\n" + sr.result_text;
+            std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+        }
+
+        // 5) LLM
         std::string context = memory_.get_context();
-        std::string reply = llm_.chat(prompt, context);
+        std::string reply = llm_.chat(prompt, context, extra);
 
         if (reply.empty()) continue;
 
@@ -396,10 +425,10 @@ void VoicePipeline::process_loop()
             continue;
         }
 
-        // 5) 更新记忆
+        // 6) 更新记忆
         memory_.add(prompt, reply);
 
-        // 6) TTS + 播放
+        // 7) TTS + 播放
         if (cfg_.tts_backend == "piper") {
             // Piper 流式管道：边合成边播，阻塞直到播完
             std::cout << "   🔊 播放中..." << std::endl;
