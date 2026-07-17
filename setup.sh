@@ -324,6 +324,14 @@ run() {
 
     # 修复 conda 环境覆盖 ALSA 插件路径导致录音失败的问题
     export ALSA_PLUGIN_DIR=/usr/lib/x86_64-linux-gnu/alsa-lib
+
+    # 修复虚拟声卡 Capture 音量过低导致 VAD 检测不到语音
+    if amixer -c 0 sget Capture &>/dev/null; then
+        amixer -c 0 set Capture 100% &>/dev/null || true
+        amixer -c 0 set "Mic Boost (+20dB)" on &>/dev/null || true
+        amixer -c 0 set Mic 50% on &>/dev/null || true
+    fi
+
     exec "${BUILD_DIR}/voice_pipeline"
 }
 
