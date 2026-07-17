@@ -11,7 +11,7 @@
     "rate": 200,
     "voice": "cmn+f3",
     "backend": "piper",
-    "piper_model": "~/pretrained_models/piper/zh_CN/zh_CN-xiao_ya-medium.onnx"
+    "piper_model": "~/pretrained_models/piper/zh_CN/zh_CN-huayan-medium.onnx"
   },
   "wake_word": {
     "keyword": ""

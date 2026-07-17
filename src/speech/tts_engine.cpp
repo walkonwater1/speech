@@ -498,7 +498,13 @@ bool TTSEngine::synthesize_espeak(const std::string& text, const std::string& ou
 
 bool TTSEngine::init_piper()
 {
-    std::cout << "[TTS] Piper 后端 (xiaoya - 小雅) ... " << std::flush;
+    std::string voice_name = piper_model_;
+    // 从路径提取语音名（如 zh_CN-huayan-medium）
+    auto last_slash = voice_name.find_last_of('/');
+    if (last_slash != std::string::npos) voice_name = voice_name.substr(last_slash + 1);
+    auto dot = voice_name.find(".onnx");
+    if (dot != std::string::npos) voice_name = voice_name.substr(0, dot);
+    std::cout << "[TTS] Piper (" << voice_name << ") ... " << std::flush;
 
     // 找 conda Python
     std::string python = "python3";
