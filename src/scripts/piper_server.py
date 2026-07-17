@@ -60,10 +60,11 @@ def _split_initial_final_tone(syl: str):
 _ZY_TO_PIPER = {
     "ya": "ia", "yao": "iao", "yan": "ian", "yang": "iang",
     "ye": "ie", "you": "iu", "yong": "iong",
-    "yu": "v", "yue": "ve", "yuan": "van", "yun": "vn",
     "wa": "ua", "wai": "uai", "wan": "uan", "wang": "uang",
     "wo": "uo", "wei": "ui", "wen": "un", "weng": "ueng",
     "wu": "u", "yi": "i", "yin": "in", "ying": "ing",
+    # yu 系列保留原样，让模型自己处理（避免 v 音素发音不准）
+    # "yu": "v", "yue": "ve", "yuan": "van", "yun": "vn",
 }
 
 def _fix_syllable(syl: str) -> str:
