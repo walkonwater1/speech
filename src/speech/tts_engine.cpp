@@ -20,6 +20,328 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
+#include <cctype>
+#include <algorithm>
+#include <unordered_map>
+
+// ── TTS 文本预处理 ────────────────────────────────────
+//
+// 问题: LLM 输出直接喂给 Piper，导致:
+//   1. 阿拉伯数字发音奇怪（Piper 是按字面读的）
+//   2. 符号/英文混排被读成乱码（°C, km/h 等）
+//   3. 没有句末标点 → 断句不正常
+//
+// 解决: 在合成前清洗文本，转成干净的纯中文 + 标点
+
+/// 阿拉伯数字 0-999 → 中文
+static std::string num_to_chinese(int n)
+{
+    static const char* digits[] = {
+        "零", "一", "二", "三", "四", "五", "六", "七", "八", "九"
+    };
+    if (n == 0) return "零";
+    if (n < 0) return "负" + num_to_chinese(-n);
+
+    std::string result;
+
+    if (n >= 1000) {
+        // 只支持到 999，超出部分分节处理
+        int q = n / 1000;
+        result += num_to_chinese(q) + "千";
+        n %= 1000;
+        if (n > 0 && n < 100) result += "零";
+    }
+
+    if (n >= 100) {
+        result += digits[n / 100] + std::string("百");
+        n %= 100;
+        if (n > 0 && n < 10) result += "零";
+    }
+
+    if (n >= 10) {
+        // 十几的特殊处理: 12 → "十二" 不是 "一十二"
+        if (n < 20 && !result.empty()) {
+            result += "十";
+        } else {
+            result += digits[n / 10] + std::string("十");
+        }
+        n %= 10;
+    }
+
+    if (n > 0) {
+        result += digits[n];
+    }
+
+    return result;
+}
+
+/// 替换字符串中的阿拉伯数字为中文读法
+static std::string replace_numbers(const std::string& text)
+{
+    std::string result;
+    result.reserve(text.size() * 2);
+
+    size_t i = 0;
+    while (i < text.size()) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+
+        // UTF-8 多字节字符：直接跳过
+        if (c >= 0x80) {
+            size_t start = i;
+            // 跳过连续的多字节字符
+            while (i < text.size() && (static_cast<unsigned char>(text[i]) >= 0x80)) {
+                ++i;
+            }
+            result.append(text, start, i - start);
+            continue;
+        }
+
+        // ASCII 数字
+        if (std::isdigit(c)) {
+            size_t start = i;
+            while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) {
+                ++i;
+            }
+            int num = std::stoi(text.substr(start, i - start));
+            result += num_to_chinese(num);
+        }
+        // 小数点
+        else if (c == '.' && i + 1 < text.size()
+                 && std::isdigit(static_cast<unsigned char>(text[i+1]))) {
+            result += "点";
+            ++i;
+        }
+        else {
+            result += text[i];
+            ++i;
+        }
+    }
+    return result;
+}
+
+/// 替换常见符号和英文缩写为中文
+static std::string replace_symbols(const std::string& text)
+{
+    static const std::vector<std::pair<std::string, std::string>> replacements = {
+        {"°C", "度"},
+        {"℃", "度"},
+        {"°F", "华氏度"},
+        {"km/h", "公里每小时"},
+        {"km", "公里"},
+        {"cm", "厘米"},
+        {"mm", "毫米"},
+        {"m/s", "米每秒"},
+        {"%", "百分之"},
+        {"wttr.in", ""},
+        {"http://", ""},
+        {"https://", ""},
+        {".com", ""},
+        {".cn", ""},
+        {".org", ""},
+    };
+
+    std::string result = text;
+    for (auto& [pat, repl] : replacements) {
+        size_t pos = 0;
+        while ((pos = result.find(pat, pos)) != std::string::npos) {
+            result.replace(pos, pat.length(), repl);
+            pos += repl.length();
+        }
+    }
+
+    // 去掉残留的纯英文单词（中音 Piper 模型无英文音素）
+    // 保留中文 + 标点，ASCII 字母连续序列全部丢弃
+    std::string cleaned;
+    cleaned.reserve(result.size());
+    size_t i = 0;
+    while (i < result.size()) {
+        unsigned char c = static_cast<unsigned char>(result[i]);
+
+        // UTF-8 多字节字符：整体保留
+        if (c >= 0x80) {
+            size_t char_len = 1;
+            if (c >= 0xF0)      char_len = 4;
+            else if (c >= 0xE0) char_len = 3;
+            else if (c >= 0xC0) char_len = 2;
+            if (i + char_len <= result.size()) {
+                cleaned.append(result, i, char_len);
+                i += char_len;
+            } else {
+                cleaned += result[i];
+                ++i;
+            }
+        }
+        // ASCII 字母：整段丢弃（Piper 中文模型无法发音）
+        else if (std::isalpha(c)) {
+            while (i < result.size() && std::isalpha(static_cast<unsigned char>(result[i]))) {
+                ++i;
+            }
+        }
+        else {
+            cleaned += result[i];
+            ++i;
+        }
+    }
+
+    return cleaned;
+}
+
+/// 确保句末有标点，改善断句
+static std::string ensure_ending_punctuation(const std::string& text)
+{
+    if (text.empty()) return text;
+
+    // 中文句末标点集合
+    static const std::string endings = "。！？….!?~～）)」』》】\"'";
+
+    char last = text.back();
+
+    // 检查最后一个字符是否标点
+    // UTF-8: 中文标点占用3字节，检查最后一个字节
+    if (endings.find(last) != std::string::npos) {
+        return text;
+    }
+
+    // 没有标点 → 加句号
+    return text + "。";
+}
+
+/// 在逗号过少的长句中插入逗号改善停顿
+static std::string add_breathing_pauses(const std::string& text)
+{
+    // 统计是否已有足够的标点
+    // 中文标点 UTF-8 序列: ，=E3 80 82, 。=E3 80 81, ！=EF BC 81, ？=EF BC 9F
+    auto is_cn_punct = [](const char* p) -> bool {
+        unsigned char a = p[0], b = p[1], c = p[2];
+        // E3 80 82 = 。
+        if (a == 0xE3 && b == 0x80) return (c == 0x82 || c == 0x81); // 。，
+        // EF BC 81 = ！, EF BC 9F = ？, EF BC 8C = ，, EF BC 9B = ；
+        if (a == 0xEF && b == 0xBC) return (c == 0x81 || c == 0x9F || c == 0x8C || c == 0x9B);
+        return false;
+    };
+
+    int punct_count = 0;
+    size_t char_count = 0;
+
+    for (size_t i = 0; i < text.size(); ) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c >= 0xE0 && i + 2 < text.size()) {
+            // 3-byte UTF-8 (most CJK)
+            if (is_cn_punct(&text[i])) {
+                ++punct_count;
+            }
+            ++char_count;
+            i += 3;
+        } else if (c >= 0xF0 && i + 3 < text.size()) {
+            ++char_count;
+            i += 4;
+        } else if (c >= 0xC0 && i + 1 < text.size()) {
+            ++char_count;
+            i += 2;
+        } else {
+            if (c == ',' || c == '.' || c == '!' || c == '?') ++punct_count;
+            ++i;
+        }
+    }
+
+    // 如果汉字 > 30 且标点 < 2 个，说明几乎没有停顿
+    if (char_count > 30 && punct_count < 2) {
+        std::string result;
+        result.reserve(text.size() + 10);
+        size_t ch_count = 0;
+        bool inserted = false;
+
+        for (size_t i = 0; i < text.size(); ) {
+            unsigned char c = static_cast<unsigned char>(text[i]);
+            size_t char_bytes = 1;
+            if (c >= 0xE0 && i + 2 < text.size()) char_bytes = 3;
+            else if (c >= 0xF0 && i + 3 < text.size()) char_bytes = 4;
+            else if (c >= 0xC0 && i + 1 < text.size()) char_bytes = 2;
+
+            if (char_bytes >= 3) ++ch_count;
+
+            result.append(text, i, char_bytes);
+            i += char_bytes;
+
+            if (!inserted && ch_count >= 15 && ch_count + 5 < char_count && i < text.size()) {
+                unsigned char nc = static_cast<unsigned char>(text[i]);
+                if (nc >= 0x80 || nc == ' ') {
+                    result += "\xEF\xBC\x8C"; // UTF-8 逗号 ，
+                    inserted = true;
+                }
+            }
+        }
+        return result;
+    }
+
+    return text;
+}
+
+/// 综合预处理
+static std::string preprocess_tts_text(const std::string& raw_text)
+{
+    std::string text = raw_text;
+
+    // 1. 替换符号（在数字转换之前，避免干扰）
+    text = replace_symbols(text);
+
+    // 2. 数字 → 中文
+    text = replace_numbers(text);
+
+    // 3. 补标点
+    text = ensure_ending_punctuation(text);
+
+    // 4. 长句加停顿
+    text = add_breathing_pauses(text);
+
+    // 5. 清理多余空格和连续标点
+    // UTF-8 句号 。= E3 80 82, 逗号 ，= EF BC 8C, 感叹号 ！= EF BC 81
+    std::string cleaned;
+    cleaned.reserve(text.size());
+    std::string prev_utf8; // track previous multi-byte punct
+    char prev_byte = 0;
+
+    auto is_cn_period = [](const char* p) -> bool {
+        return (unsigned char)p[0] == 0xE3 && (unsigned char)p[1] == 0x80
+            && (unsigned char)p[2] == 0x82;
+    };
+    auto is_cn_comma = [](const char* p) -> bool {
+        return (unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBC
+            && (unsigned char)p[2] == 0x8C;
+    };
+    auto is_cn_excl = [](const char* p) -> bool {
+        return (unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBC
+            && (unsigned char)p[2] == 0x81;
+    };
+
+    for (size_t i = 0; i < text.size(); ) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        size_t char_bytes = 1;
+        if (c >= 0xF0 && i + 3 < text.size()) char_bytes = 4;
+        else if (c >= 0xE0 && i + 2 < text.size()) char_bytes = 3;
+        else if (c >= 0xC0 && i + 1 < text.size()) char_bytes = 2;
+
+        if (char_bytes >= 3 && i + 2 < text.size()
+            && (is_cn_period(&text[i]) || is_cn_comma(&text[i]) || is_cn_excl(&text[i]))) {
+            std::string current(text, i, char_bytes);
+            if (current != prev_utf8) {
+                cleaned += current;
+                prev_utf8 = current;
+            }
+            // else: skip duplicate punctuation
+        } else if (c == ' ' && (prev_byte == ' ' || prev_byte == 0)) {
+            // skip duplicate spaces
+        } else {
+            // 保留整组 UTF-8 字节（中文等多字节字符）
+            cleaned.append(text, i, char_bytes);
+            prev_byte = c;
+            prev_utf8.clear();
+        }
+        i += char_bytes;
+    }
+
+    return cleaned;
+}
 
 // ── espeak 回调 ─────────────────────────────────────
 
@@ -321,8 +643,14 @@ bool TTSEngine::synthesize_piper(const std::string& text, const std::string& /*o
 {
     if (!piper_in_ || !piper_out_) return false;
 
+    // 0. 文本预处理：数字→中文、符号清洗、补标点
+    std::string cleaned = preprocess_tts_text(text);
+    if (cleaned != text) {
+        std::cout << "   [TTS] 预处理: \"" << text << "\" → \"" << cleaned << "\"" << std::endl;
+    }
+
     // 1. 发文本给 Python 进程
-    fputs(text.c_str(), piper_in_);
+    fputs(cleaned.c_str(), piper_in_);
     fputc('\n', piper_in_);
     fflush(piper_in_);
 

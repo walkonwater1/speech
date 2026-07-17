@@ -93,11 +93,21 @@ def fast_phonemize(text: str) -> list:
         syl = _fix_syllable(_normalize_syllable(py))
         ini, fin, tone = _split_initial_final_tone(syl)
         if not fin:
-            phonemes.append(syl)
+            # 无法拆分的音节，直接整体添加（并在 map 中检查）
+            if syl in PHONEME_TO_ID:
+                phonemes.append(syl)
+            else:
+                # 尝试逐个字符添加
+                for c in syl:
+                    if c in PHONEME_TO_ID:
+                        phonemes.append(c)
             continue
         if not ini:
             ini = "Ø"
-        phonemes.extend([ini, fin, tone])
+        # 安全检查：只添加存在于音素映射表中的音素
+        for p in [ini, fin, tone]:
+            if p in PHONEME_TO_ID:
+                phonemes.append(p)
 
     return [phonemes]
 
