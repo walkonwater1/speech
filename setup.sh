@@ -322,6 +322,8 @@ run() {
         done
     fi
 
+    # 修复 conda 环境覆盖 ALSA 插件路径导致录音失败的问题
+    export ALSA_PLUGIN_DIR=/usr/lib/x86_64-linux-gnu/alsa-lib
     exec "${BUILD_DIR}/voice_pipeline"
 }
 
