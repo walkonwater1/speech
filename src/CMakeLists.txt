@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 系统库
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system)
+find_package(websocketpp QUIET)  # header-only, optional
 
 # espeak-ng (libespeak-ng.so.1 已安装，手动指定路径)
 set(ESPEAK_LIB "/usr/lib/x86_64-linux-gnu/libespeak-ng.so.1")
@@ -98,6 +100,39 @@ set(HEADERS
 
 # ── 可执行文件 ────────────────────────────────────────
 add_executable(voice_pipeline main.cpp ${SOURCES} ${HEADERS})
+
+# ── WebSocket 语音服务 (Layer 4.1) ─────────────────────
+set(SERVER_SOURCES
+    server_main.cpp
+    server/ws_server.cpp
+)
+add_executable(ws_voice_server ${SERVER_SOURCES} ${SOURCES} ${HEADERS})
+target_include_directories(ws_voice_server PRIVATE
+    ${CMAKE_SOURCE_DIR}/pipeline
+    ${CMAKE_SOURCE_DIR}/speech
+    ${CMAKE_SOURCE_DIR}/brain
+    ${CMAKE_SOURCE_DIR}/brain/skills
+    ${CMAKE_SOURCE_DIR}/llm
+    ${CMAKE_SOURCE_DIR}/memory
+    ${CMAKE_SOURCE_DIR}/audio
+    ${CMAKE_SOURCE_DIR}/server
+    ${CMAKE_SOURCE_DIR}/utils
+    ${CURL_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(ws_voice_server PRIVATE
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    ${ESPEAK_LIB}
+    pthread
+    Boost::system
+)
+if(SHERPA_ONNX_LIB)
+    target_include_directories(ws_voice_server PRIVATE ${SHERPA_ONNX_INCLUDE})
+    target_link_libraries(ws_voice_server PRIVATE ${SHERPA_ONNX_LIB})
+    target_compile_definitions(ws_voice_server PRIVATE SHERPA_ONNX_AVAILABLE)
+endif()
+target_compile_options(ws_voice_server PRIVATE -Wall -Wextra -O2)
 
 # 语音情感分析独立测试
 add_executable(test_voice_emotion test_voice_emotion.cpp)

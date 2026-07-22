@@ -68,6 +68,11 @@ public:
     /// @return LLM 回复文本（失败返回空串）
     std::string process_voice();
 
+    /// 从已有 WAV 文件处理语音（跳过录音步骤，用于 WS 服务等场景）
+    /// @param wav_path  已录制的 WAV 文件路径
+    /// @return LLM 回复文本
+    std::string process_voice_file(const std::string& wav_path);
+
     /// 声纹注册
     bool enroll_speaker();
 

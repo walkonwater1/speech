@@ -337,6 +337,64 @@ std::string VoicePipeline::process_voice()
     return reply;
 }
 
+std::string VoicePipeline::process_voice_file(const std::string& wav_path)
+{
+    if (!initialized_) return "";
+
+    std::string prompt = asr_.transcribe(wav_path);
+    if (prompt.empty()) {
+        std::cout << "   ⚠️ 未识别到语音" << std::endl;
+        return "";
+    }
+
+    // 跳过唤醒词和声纹检查（WS 客户端已自行管理）
+
+    std::string reply;
+
+    if (react_) {
+        auto tools = skill_mgr_.collect_function_defs();
+        if (!tools.empty()) {
+            auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
+                return skill_mgr_.execute_tool(name, args, "");
+            };
+            std::string ctx = memory_.get_context();
+            auto result = react_->run(prompt, tools, exec_fn, ctx, cfg_.react_max_steps);
+            if (result.success && !result.final_answer.empty()) {
+                reply = result.final_answer;
+            }
+        }
+    }
+
+    if (reply.empty()) {
+        SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+        std::string extra = SkillManager::get_system_context();
+        if (sr.hit) {
+            extra += "\n" + sr.result_text;
+        }
+        std::string context = memory_.get_context();
+        reply = llm_.chat(prompt, context, extra);
+    }
+
+    if (reply.empty()) return "";
+
+    if (multi_agent_) {
+        std::string cmodel = cfg_.ma_critic_model.empty()
+            ? cfg_.llm_model : cfg_.ma_critic_model;
+        auto ma = multi_agent_->collaborate(
+            prompt, reply, "", cfg_.system_prompt,
+            cfg_.llm_model, cmodel, cfg_.ma_max_rounds);
+        reply = ma.final_answer;
+    } else if (reflect_) {
+        auto r = reflect_->reflect(prompt, reply);
+        reply = r.improved;
+    }
+
+    memory_.add(prompt, reply);
+    speak_and_play(reply, prompt);
+
+    return reply;
+}
+
 bool VoicePipeline::enroll_speaker()
 {
     const std::string wav_file = "temp_enroll.wav";
