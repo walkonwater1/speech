@@ -2,18 +2,29 @@
 /**
  * 技能基类 — 所有 Skill 的抽象接口
  *
- * 小模型 (qwen2.5:0.5b) 做 function calling 不稳定，
- * 改用「意图检测 + 技能执行 + 上下文注入」方案：
+ * 两层调度策略（混合模式）:
  *
- *   用户文本 → Skill::match()
- *                │
- *                ├─ 命中 → Skill::execute() → 结果注入 LLM 上下文
- *                └─ 未命中 → 直接发给 LLM
+ *   1. Function Calling (LLM 驱动，优先):
+ *      LLM 收到所有工具的 JSON Schema → LLM 自主选择工具 + 提取参数
+ *      "外面冷不冷" → LLM 理解语义 → {"tool":"weather","args":{"city":"北京"}}
+ *
+ *   2. Keyword Match (关键字匹配，降级):
+ *      用户文本 → Skill::match() → 命中 → execute()
+ *      当 LLM function calling 失败或模型太小时自动降级
  *
  *   新增技能只需继承 Skill，在 SkillManager 构造函数中注册即可。
  */
 
 #include <string>
+#include <nlohmann/json.hpp>
+
+// ── 函数定义（供 LLM function calling 使用）──────────
+
+struct FunctionDef {
+    std::string name;              // 函数名
+    std::string description;       // 功能描述（LLM 用此判断何时调用）
+    nlohmann::json parameters;     // JSON Schema 参数定义
+};
 
 // ── 技能执行结果 ──────────────────────────────────────
 
@@ -32,7 +43,7 @@ public:
 
     virtual ~Skill() = default;
 
-    /// 意图匹配：检查用户输入是否触发该技能
+    /// 意图匹配：检查用户输入是否触发该技能（关键字降级方案）
     /// @param text 用户原文（ASR 识别结果）
     virtual bool match(const std::string& text) = 0;
 
@@ -43,6 +54,10 @@ public:
 
     /// 该技能的能力描述（会注入 system prompt，让 LLM 知道它的存在）
     virtual std::string describe() const { return ""; }
+
+    /// 返回 Function Calling 的函数定义（JSON Schema）
+    /// 用于 LLM 驱动的工具选择
+    virtual FunctionDef get_function_def() const { return {}; }
 
     const std::string& name()    const { return name_; }
     bool               enabled() const { return enabled_; }

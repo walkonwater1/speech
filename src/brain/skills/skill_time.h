@@ -14,4 +14,16 @@ public:
     std::string describe() const override {
         return "你可以获取当前时间和日期。";
     }
+
+    FunctionDef get_function_def() const override {
+        FunctionDef def;
+        def.name = "time";
+        def.description = "获取当前日期、时间和星期";
+        // 无需参数
+        def.parameters = nlohmann::json::parse(R"({
+            "type": "object",
+            "properties": {}
+        })");
+        return def;
+    }
 };

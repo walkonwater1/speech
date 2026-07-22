@@ -36,6 +36,23 @@ public:
         return "你可以查阅知识库。当用户问到知识库中可能有的内容时，参考检索结果回答。";
     }
 
+    FunctionDef get_function_def() const override {
+        FunctionDef def;
+        def.name = "rag";
+        def.description = "检索本地知识库中的文档内容，回答政策、流程、规定等相关问题";
+        def.parameters = nlohmann::json::parse(R"({
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "要在知识库中检索的问题，如'年假政策是什么'"
+                }
+            },
+            "required": ["question"]
+        })");
+        return def;
+    }
+
     /// 加载/重新加载知识库文档
     void load_documents(const std::string& docs_dir);
 

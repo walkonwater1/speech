@@ -35,6 +35,10 @@
     "max_rounds": 10,
     "max_tokens": 512
   },
+  "function_calling": {
+    "enabled": true,
+    "model": ""
+  },
   "skills": {
     "weather": { "enabled": true },
     "time": { "enabled": true },

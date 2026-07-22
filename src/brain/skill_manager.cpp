@@ -14,6 +14,7 @@
 #include "skills/skill_time.h"
 #include "skills/skill_search.h"
 #include "skills/skill_rag.h"
+#include "function_caller.h"
 #include "embedding_engine.h"
 
 #include <sstream>
@@ -53,18 +54,70 @@ void SkillManager::set_enabled(const std::string& name, bool enabled)
     }
 }
 
+// ── 辅助：收集函数定义 + 按名查找 ─────────────────────
+
+std::vector<FunctionDef> SkillManager::collect_function_defs() const
+{
+    std::vector<FunctionDef> defs;
+    for (auto& s : skills_) {
+        if (!s->enabled()) continue;
+        FunctionDef def = s->get_function_def();
+        if (!def.name.empty()) {
+            defs.push_back(std::move(def));
+        }
+    }
+    return defs;
+}
+
+Skill* SkillManager::find_skill(const std::string& name)
+{
+    for (auto& s : skills_) {
+        if (s->name() == name) return s.get();
+    }
+    return nullptr;
+}
+
+// ── 核心：混合调度 ────────────────────────────────────
+
 SkillResult SkillManager::detect_and_execute(const std::string& user_text)
 {
+    // ── 策略 1: Function Calling (LLM 驱动) ──────────
+    if (function_caller_ && fc_enabled_) {
+        auto func_defs = collect_function_defs();
+        if (!func_defs.empty()) {
+            ToolDecision td = function_caller_->decide(user_text, func_defs);
+
+            if (td.use_tool) {
+                Skill* skill = find_skill(td.tool_name);
+                if (skill && skill->enabled()) {
+                    std::string result = skill->execute(user_text);
+                    if (!result.empty()) {
+                        std::cout << "   [Skill-FC] \"" << user_text
+                                  << "\" → LLM 选择了 " << td.tool_name << std::endl;
+                        return {true, td.tool_name, result};
+                    }
+                } else {
+                    std::cout << "   [Skill-FC] LLM 选了未知工具: "
+                              << td.tool_name << "，降级到关键字匹配" << std::endl;
+                }
+            }
+        }
+    }
+
+    // ── 策略 2: Keyword Match (降级方案) ──────────────
     for (auto& s : skills_) {
         if (!s->enabled()) continue;
 
         if (s->match(user_text)) {
             std::string result = s->execute(user_text);
             if (!result.empty()) {
+                std::cout << "   [Skill-KW] \"" << user_text
+                          << "\" → 关键字匹配 " << s->name() << std::endl;
                 return {true, s->name(), result};
             }
         }
     }
+
     return {false, "", ""};
 }
 

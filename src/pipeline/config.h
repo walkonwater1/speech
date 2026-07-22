@@ -57,6 +57,10 @@ struct PipelineConfig {
     bool skill_rag        = false;
     std::string rag_docs_dir = "knowledge_base";
 
+    // ── Function Calling (LLM 驱动工具选择) ──────────
+    bool fc_enabled     = true;            // 启用 function calling
+    std::string fc_model = "";             // 工具选择模型（空=复用 llm_model）
+
     // ── 文件加载 ───────────────────────────────────
 
     /// 从 JSON 文件加载配置（未出现在文件中的键保持默认值）

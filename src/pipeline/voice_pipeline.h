@@ -45,6 +45,7 @@
 #include "vad.h"
 #include "skill_manager.h"
 #include "embedding_engine.h"
+#include "function_caller.h"
 
 class VoicePipeline {
 public:
@@ -87,6 +88,7 @@ private:
     SkillManager      skill_mgr_;
     AudioRecorder     recorder_;
     std::shared_ptr<EmbeddingEngine> embed_;  // RAG 共用
+    std::shared_ptr<FunctionCaller> fc_;      // Function Calling
 
     bool initialized_ = false;
 

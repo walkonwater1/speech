@@ -106,6 +106,13 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(m, "max_tokens", max_tokens);
     }
 
+    // ── Function Calling ────────────────────────────
+    if (j.contains("function_calling")) {
+        auto& fc = j["function_calling"];
+        try_get(fc, "enabled", fc_enabled);
+        try_get(fc, "model",   fc_model);
+    }
+
     // ── 技能 ────────────────────────────────────────
     if (j.contains("skills")) {
         auto& s = j["skills"];

@@ -70,6 +70,18 @@ bool VoicePipeline::initialize()
         skill_mgr_.set_enabled("rag", true);
     }
 
+    // ── 初始化 Function Calling ──────────────────────
+    if (cfg_.fc_enabled) {
+        std::string fc_model = cfg_.fc_model.empty() ? cfg_.llm_model : cfg_.fc_model;
+        std::cout << "[FunctionCalling] 启用 LLM 驱动工具选择 (模型: "
+                  << fc_model << ")" << std::endl;
+        fc_ = std::make_shared<FunctionCaller>(cfg_.ollama_host, fc_model);
+        skill_mgr_.set_function_caller(fc_);
+    } else {
+        std::cout << "[FunctionCalling] 禁用，使用关键字匹配降级方案" << std::endl;
+        skill_mgr_.set_function_calling_enabled(false);
+    }
+
     std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
