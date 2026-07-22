@@ -91,10 +91,12 @@ bool PipelineConfig::load_from_file(const std::string& path)
     // ── VAD ────────────────────────────────────────
     if (j.contains("vad")) {
         auto& v = j["vad"];
+        try_get(v, "backend",            vad_backend);
         try_get(v, "energy_threshold",   vad_energy_threshold);
         try_get(v, "min_speech_frames",  vad_min_speech_frames);
         try_get(v, "min_silence_frames", vad_min_silence_frames);
         try_get(v, "pre_speech_frames",  vad_pre_speech_frames);
+        try_get(v, "adaptive_factor",    vad_adaptive_factor);
     }
 
     // ── 对话记忆 ───────────────────────────────────

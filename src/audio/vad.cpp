@@ -1,17 +1,18 @@
 /**
- * 基于能量的语音活动检测器 (Energy-based VAD)
+ * 语音活动检测器 (VAD) 实现
  *
- * Python 对应: run_realtime.py → check_vad_activity() (webrtcvad)
- *
- * 原理:
- *   计算每帧音频的 RMS（均方根），超过阈值 → 说话中；低于阈值 → 静音。
- *   通过 min_speech_frames / min_silence_frames 实现去抖（debounce）。
+ * EnergyVAD:   固定 RMS 阈值
+ * AdaptiveVAD: 自适应噪声基线 + 动态阈值
  */
 
 #include "vad.h"
 #include <cmath>
 #include <algorithm>
 #include <cstring>
+
+// ════════════════════════════════════════════════════════════════
+// EnergyVAD（固定阈值）
+// ════════════════════════════════════════════════════════════════
 
 EnergyVAD::EnergyVAD(const VADConfig& cfg)
     : cfg_(cfg)
@@ -30,65 +31,77 @@ float EnergyVAD::compute_rms(const float* samples, int n) const
     return std::sqrt(sum / n);
 }
 
-EnergyVAD::State EnergyVAD::process_frame(const float* samples, int n)
+EnergyVAD::FrameDecision EnergyVAD::decide_frame(const float* samples, int n)
 {
     float rms = compute_rms(samples, n);
-    bool is_speech_frame = (rms > cfg_.energy_threshold);
+    return {rms > cfg_.energy_threshold, rms};
+}
+
+VADState EnergyVAD::process_frame(const float* samples, int n)
+{
+    FrameDecision d = decide_frame(samples, n);
 
     segment_ready_ = false;
 
     switch (state_) {
-    case SILENCE:
-        if (is_speech_frame) {
+    case VADState::SILENCE:
+        if (d.is_speech) {
             speech_frames_ = 1;
             silence_frames_ = 0;
-            state_ = SPEECH_START;
+            state_ = VADState::SPEECH_START;
 
-            // 把语音开始前的预录音频 prepend 到 speech buffer
+            // 从环形缓冲区按时间顺序取出预录数据
             int pre_size = (int)pre_buffer_.size();
             speech_buffer_.clear();
             speech_buffer_.reserve(pre_size + n * 10);
-            // 从环形缓冲区按时间顺序取出预录数据
             for (int i = 0; i < pre_size; ++i) {
                 int idx = (pre_buffer_pos_ + i) % pre_size;
                 speech_buffer_.push_back(pre_buffer_[idx]);
             }
             speech_buffer_.insert(speech_buffer_.end(), samples, samples + n);
-            return SPEECH_START;
+            return VADState::SPEECH_START;
         }
-        return SILENCE;
+        return VADState::SILENCE;
 
-    case SPEECH_START:
-    case SPEECH_ONGOING:
-        if (is_speech_frame) {
+    case VADState::SPEECH_START:
+    case VADState::SPEECH_ONGOING:
+        // 安全上限：防止无限增长导致 OOM
+        if (speech_buffer_.size() + n > (size_t)cfg_.max_speech_samples) {
+            segment_ready_ = true;
+            state_ = VADState::SILENCE;
+            speech_frames_ = 0;
+            silence_frames_ = 0;
+            return VADState::SPEECH_END;
+        }
+
+        if (d.is_speech) {
             speech_frames_++;
             silence_frames_ = 0;
-            state_ = SPEECH_ONGOING;
+            state_ = VADState::SPEECH_ONGOING;
             speech_buffer_.insert(speech_buffer_.end(), samples, samples + n);
-            return SPEECH_ONGOING;
+            return VADState::SPEECH_ONGOING;
         } else {
             silence_frames_++;
             speech_buffer_.insert(speech_buffer_.end(), samples, samples + n);
 
-            // 静音帧足够多 → 语音结束
             if (silence_frames_ >= cfg_.min_silence_frames
                 && speech_frames_ >= cfg_.min_speech_frames)
             {
                 segment_ready_ = true;
-                state_ = SILENCE;
-                return SPEECH_END;
+                state_ = VADState::SILENCE;
+                return VADState::SPEECH_END;
             }
-            return SPEECH_ONGOING;
+            return VADState::SPEECH_ONGOING;
         }
 
     default:
-        return SILENCE;
+        return VADState::SILENCE;
     }
 }
 
 bool EnergyVAD::in_speech() const
 {
-    return state_ == SPEECH_START || state_ == SPEECH_ONGOING;
+    return state_ == VADState::SPEECH_START || state_ == VADState::SPEECH_ONGOING;
 }
 
 std::vector<float> EnergyVAD::pop_segment()
@@ -98,13 +111,12 @@ std::vector<float> EnergyVAD::pop_segment()
     speech_buffer_.clear();
     speech_frames_ = 0;
     silence_frames_ = 0;
-    state_ = SILENCE;
+    state_ = VADState::SILENCE;
     return result;
 }
 
 void EnergyVAD::feed_pre_buffer(const float* samples, int n)
 {
-    // 环形写入
     int pre_size = (int)pre_buffer_.size();
     if (pre_size == 0) return;
 
@@ -116,11 +128,41 @@ void EnergyVAD::feed_pre_buffer(const float* samples, int n)
 
 void EnergyVAD::reset()
 {
-    state_ = SILENCE;
+    state_ = VADState::SILENCE;
     speech_frames_ = 0;
     silence_frames_ = 0;
     segment_ready_ = false;
     speech_buffer_.clear();
     pre_buffer_pos_ = 0;
     std::fill(pre_buffer_.begin(), pre_buffer_.end(), 0.0f);
+}
+
+// ════════════════════════════════════════════════════════════════
+// AdaptiveVAD（自适应噪声基线）
+// ════════════════════════════════════════════════════════════════
+
+AdaptiveVAD::AdaptiveVAD(const VADConfig& cfg)
+    : EnergyVAD(cfg)
+{}
+
+EnergyVAD::FrameDecision AdaptiveVAD::decide_frame(const float* samples, int n)
+{
+    float rms = compute_rms(samples, n);
+
+    // 只在静音时更新噪声基线
+    if (state_ == VADState::SILENCE) {
+        float alpha = cfg_.noise_update_rate;
+        if (!noise_floor_initialized_) {
+            noise_floor_ = rms;
+            noise_floor_initialized_ = true;
+        } else {
+            noise_floor_ = (1.0f - alpha) * noise_floor_ + alpha * rms;
+        }
+    }
+
+    float threshold = noise_floor_initialized_
+        ? noise_floor_ * cfg_.adaptive_factor
+        : cfg_.energy_threshold;
+
+    return {rms > threshold, rms};
 }

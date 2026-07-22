@@ -39,10 +39,12 @@ struct PipelineConfig {
     int sample_rate = 16000;
 
     // ── VAD（语音活动检测 / 打断灵敏度）─────────────
-    float vad_energy_threshold   = 0.003f;   // RMS 阈值，越大越不敏感
+    std::string vad_backend          = "energy";   // "energy" 或 "adaptive"
+    float vad_energy_threshold   = 0.003f;   // RMS 阈值，越大越不敏感（仅 energy 模式）
     int   vad_min_speech_frames  = 8;        // 最小语音帧数 (~160ms)
     int   vad_min_silence_frames = 30;       // 静音多少帧后判结束 (~600ms)
     int   vad_pre_speech_frames  = 15;       // 语音开始前保留帧数 (~300ms)
+    float vad_adaptive_factor    = 3.0f;     // 阈值 = 噪声基线 × factor（仅 adaptive 模式）
 
     // ── 对话记忆 ───────────────────────────────────
     int max_rounds = 10;

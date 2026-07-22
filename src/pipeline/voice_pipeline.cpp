@@ -15,6 +15,7 @@
  */
 
 #include "voice_pipeline.h"
+#include "denoiser.h"
 
 #include <iostream>
 #include <cstdio>
@@ -275,8 +276,9 @@ void VoicePipeline::capture_loop()
     vad_cfg.min_speech_frames  = cfg_.vad_min_speech_frames;
     vad_cfg.min_silence_frames = cfg_.vad_min_silence_frames;
     vad_cfg.pre_speech_frames  = cfg_.vad_pre_speech_frames;
+    vad_cfg.adaptive_factor    = cfg_.vad_adaptive_factor;
 
-    EnergyVAD vad(vad_cfg);
+    auto vad = create_vad(cfg_.vad_backend, vad_cfg);
 
     const int frame_samples = vad_cfg.frame_size_samples;   // 20ms @16kHz
     const int frame_bytes   = frame_samples * 2;  // int16 = 2 bytes
@@ -284,7 +286,10 @@ void VoicePipeline::capture_loop()
     std::vector<int16_t> raw_buf(frame_samples);
     std::vector<float>   float_buf(frame_samples);
 
-    std::cout << "🎙️  麦克风已开启，开始监听..." << std::endl;
+    // 音频预处理器: 去直流偏置 + 噪声门
+    Denoiser denoiser(16000);
+
+    std::cout << "🎙️  麦克风已开启，开始监听... (VAD: " << cfg_.vad_backend << ")" << std::endl;
 
     while (interactive_running_) {
         // 读一帧音频
@@ -301,14 +306,17 @@ void VoicePipeline::capture_loop()
             float_buf[i] = raw_buf[i] / 32768.0f;
         }
 
+        // 音频预处理: 去直流 + 噪声门
+        denoiser.process_frame(float_buf.data(), frame_samples);
+
         // 持续喂预录音缓冲区
-        vad.feed_pre_buffer(float_buf.data(), frame_samples);
+        vad->feed_pre_buffer(float_buf.data(), frame_samples);
 
         // VAD 处理
-        EnergyVAD::State vad_state = vad.process_frame(float_buf.data(), frame_samples);
+        VADState vad_state = vad->process_frame(float_buf.data(), frame_samples);
 
         // 🔴 打断：检测到语音开始 且 正在播放 → 立刻停止播放
-        if (vad_state == EnergyVAD::SPEECH_START && is_playing_.load()) {
+        if (vad_state == VADState::SPEECH_START && is_playing_.load()) {
             pid_t pid = player_pid_.exchange(-1);
             if (pid > 0) {
                 AudioPlayer::stop_async(pid);
@@ -318,8 +326,8 @@ void VoicePipeline::capture_loop()
         }
 
         // 语音段结束 → 入队
-        if (vad.segment_ready()) {
-            auto segment = vad.pop_segment();
+        if (vad->segment_ready()) {
+            auto segment = vad->pop_segment();
 
             // 检查最小长度：至少 0.5 秒
             float duration = (float)segment.size() / 16000.0f;

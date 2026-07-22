@@ -34,6 +34,10 @@ set(SOURCES
     brain/chat_memory.cpp
     brain/skill_manager.cpp
 
+    brain/skills/skill_weather.cpp
+    brain/skills/skill_time.cpp
+    brain/skills/skill_search.cpp
+
     audio/audio_io.cpp
     audio/vad.cpp
 )
@@ -50,7 +54,13 @@ set(HEADERS
 
     brain/llm_engine.h
     brain/chat_memory.h
+    brain/skill_base.h
+    brain/skill_utils.h
     brain/skill_manager.h
+
+    brain/skills/skill_weather.h
+    brain/skills/skill_time.h
+    brain/skills/skill_search.h
 
     audio/audio_io.h
     audio/vad.h

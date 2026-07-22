@@ -24,10 +24,12 @@
     "sample_rate": 16000
   },
   "vad": {
+    "backend": "adaptive",
     "energy_threshold": 0.003,
     "min_speech_frames": 8,
     "min_silence_frames": 30,
-    "pre_speech_frames": 15
+    "pre_speech_frames": 15,
+    "adaptive_factor": 3.0
   },
   "memory": {
     "max_rounds": 10,

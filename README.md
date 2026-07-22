@@ -349,6 +349,61 @@ P2（锦上添花）:
 
 ---
 
-## 许可证
+## 学习路线图
 
-Apache 2.0.
+本仓库覆盖了语音 Agent 的完整链路。建议从现有代码出发，按以下路线由浅入深地理解 LLM 与 Agent 的核心概念。
+
+### 第一层：LLM 基础
+
+理解语言模型如何工作，基于现有 `llm_engine.cpp` / `chat_memory.cpp` 扩展。
+
+| 主题 | 做什么 | 学到什么 |
+|------|--------|---------|
+| **Prompt Engineering** | system prompt 模板化，支持 `{time}` `{weather}` 变量注入，对比不同 prompt 的回复质量 | prompt 结构对模型输出的影响 |
+| **Token 与上下文窗口** | 当前 `ChatMemory` 用字符数估算 token 数，改为调 Ollama `/api/tokens` 获取真实 token 计数 | token 是什么、context window 如何管理 |
+| **Embedding 语义搜索** | 用 Ollama `/api/embed` 对文本做向量化，实现「语义相似度」替代关键字匹配 | 向量嵌入原理、余弦相似度 |
+| **RAG 检索增强生成** | `embedding + 向量存储 + LLM` 完整链路：检索相关文档 → 拼入上下文 → LLM 生成答案 | RAG 架构、chunk 策略、召回率 |
+| **结构化输出** | 给 Ollama 加 `format: "json"`，让 LLM 输出固定格式 JSON，解析后做实体提取/意图分类 | JSON mode、输出约束 |
+
+### 第二层：Agent 演进
+
+从关键字路由（当前实现）逐步演进到 LLM 自主决策的 Agent。
+
+| 主题 | 做什么 | 学到什么 |
+|------|--------|---------|
+| **理解当前 Agent 架构** | 当前 `SkillManager` 就是 Agent 的核心循环：`感知(ASR) → 路由(match) → 工具(execute) → 推理(LLM) → 行动(TTS)`。对比它与 OpenAI function calling 的异同 | Agent 的本质定义 |
+| **Function Calling** | 把 `Skill::match()` 替换为：发所有工具 schema 给 LLM，LLM 返回 `{tool: "weather", args: {city: "北京"}}`。需要切到更强模型（`qwen2.5:7b` 或云端 API） | 工具调用协议、LLM 决策 vs 规则匹配 |
+| **ReAct 模式** | 实现 `思考 → 行动 → 观察 → 思考...` 多步推理循环。例如："先查天气 → 再查日历 → 综合建议今天穿什么" | 思维链、多步推理、工具编排 |
+| **Reflection 反思** | LLM 生成回复后，再调一次 LLM 做自检："回复是否有事实错误？语气是否合适？" | 自校正、幻觉检测 |
+| **Multi-Agent 对话** | 两个 Agent 互相对话：一个扮演用户提需求，一个扮演助手回复，观察涌现行为 | 多 Agent 协作、角色扮演 |
+
+### 第三层：语音交互深入
+
+| 主题 | 做什么 | 学到什么 |
+|------|--------|---------|
+| **流式 ASR** | 当前是离线 ASR（整段 WAV 一次性识别），改成 sherpa-onnx streaming API — 边说边出字 | 流式推理、音频分帧 |
+| **情感识别** | SenseVoice 输出自带情感标签（`<|HAPPY|>` `<|ANGRY|>` 等），提取后影响 LLM 回复情绪 | 多模态特征利用 |
+| **声纹库** | 当前只支持 1 个声纹注册，扩展为多用户身份管理 + "谁在说话"自动识别 | 说话人识别、embedding 比对 |
+| **TTS 韵律控制** | 给 Piper 传 SSML 标签（语速/停顿/重音），让合成语音更有表现力 | TTS 前端处理、SSML |
+
+### 第四层：系统工程
+
+| 主题 | 做什么 | 学到什么 |
+|------|--------|---------|
+| **WebSocket 服务化** | 把 CLI 交互改成 WebSocket 服务，前端可以做成网页版语音助手 | 实时通信、服务端架构 |
+| **本地模型嵌入** | 把 LLM 从远程 Ollama 换成 llama.cpp C API 直接嵌入进程，消除网络延迟 | 模型推理引擎、内存管理 |
+| **可观测性** | 给每个模块加 metrics（LLM 耗时、ASR 置信度、TTS 延迟），输出结构化日志 | 生产级监控 |
+| **配置热更新** | 不重启进程即可切换 LLM 模型、调整 VAD 阈值、开关技能 | 动态配置管理 |
+
+### 推荐学习顺序
+
+```
+1. Prompt Engineering（1-2 天）       ← 理解 LLM 行为
+2. Token 与上下文管理（1 天）          ← 理解模型输入限制
+3. Embedding + RAG（2-3 天）          ← 理解语义检索
+4. Function Calling（2-3 天）         ← Agent 的核心跃迁
+5. ReAct 多步推理（2 天）              ← 真正的自主 Agent
+6. Multi-Agent（1-2 天）              ← 涌现行为观察
+```
+
+每一步都在当前仓库基础上增量实现，不破坏已有功能。做完前 4 步你就完整理解了从「关键字路由的 Demo」到「LLM 自主决策的 Agent」的演进过程。
