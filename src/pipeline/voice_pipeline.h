@@ -40,6 +40,7 @@
 #include "tts_engine.h"
 #include "wake_word.h"
 #include "speaker_verifier.h"
+#include "voiceprint_library.h"
 #include "chat_memory.h"
 #include "audio_io.h"
 #include "vad.h"
@@ -88,7 +89,8 @@ private:
     LLMEngine         llm_;
     TTSEngine         tts_;
     WakeWordDetector  kws_;
-    SpeakerVerifier   speaker_;
+    SpeakerVerifier   speaker_;       // 旧版单用户声纹（向后兼容）
+    VoiceprintLibrary voiceprint_;   // 新版多用户声纹库 (Layer 3.4)
     ChatMemory        memory_;
     SkillManager      skill_mgr_;
     AudioRecorder     recorder_;

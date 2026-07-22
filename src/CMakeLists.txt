@@ -30,6 +30,7 @@ set(SOURCES
     speech/tts_engine.cpp
     speech/wake_word.cpp
     speech/speaker_verifier.cpp
+    speech/voiceprint_library.cpp
 
     brain/skill_manager.cpp
 
@@ -63,6 +64,7 @@ set(HEADERS
     speech/tts_engine.h
     speech/wake_word.h
     speech/speaker_verifier.h
+    speech/voiceprint_library.h
     speech/espeak_min.h
 
     brain/skill_base.h

@@ -57,6 +57,20 @@ bool VoicePipeline::initialize()
         std::cerr << "❌ 声纹模型初始化失败" << std::endl;
     }
 
+    // ── 初始化多用户声纹库 (Layer 3.4) ──────────────────
+    {
+        float vp_threshold = cfg_.sv_threshold;
+        std::string vp_dir = cfg_.sv_enroll_dir.empty()
+            ? "voiceprint_library" : cfg_.sv_enroll_dir + "_library";
+        if (voiceprint_.initialize(vp_dir, vp_threshold)) {
+            voiceprint_.set_event_callback(
+                [](const std::string& event, const std::string& detail) {
+                    std::cout << "   [Voiceprint] 事件: " << event
+                              << " → " << detail << std::endl;
+                });
+        }
+    }
+
     if (!tts_.initialize()) {
         std::cerr << "❌ TTS 初始化失败" << std::endl;
         return false;
@@ -148,6 +162,7 @@ bool VoicePipeline::initialize()
     std::cout << std::endl;
 
     std::cout << "   " << speaker_.status_text() << std::endl;
+    std::cout << "   [Voiceprint] " << voiceprint_.status_text() << std::endl;
     std::cout << std::endl;
 
     initialized_ = true;
@@ -239,14 +254,30 @@ std::string VoicePipeline::process_voice()
         return "";
     }
 
-    if (!speaker_.has_enrolled()) {
+    // ── 多用户声纹识别 (Layer 3.4) ──────────────────────
+    if (voiceprint_.has_any()) {
+        auto id = voiceprint_.identify(wav_file);
+        if (id.identified()) {
+            // 自动切换到识别的用户
+            if (id.name != voiceprint_.active_speaker()) {
+                voiceprint_.set_active_speaker(id.name);
+            }
+            std::cout << "   👤 说话人: " << id.display_name
+                      << " (置信度=" << id.confidence << ")" << std::endl;
+        } else {
+            speak_and_play("抱歉，我没有识别出你的声音，请先注册声纹");
+            std::remove(wav_file.c_str());
+            return "";
+        }
+    } else if (speaker_.has_enrolled()) {
+        // 旧版单用户验证
+        if (!speaker_.verify(wav_file)) {
+            speak_and_play("声纹验证失败，我无法为您服务");
+            std::remove(wav_file.c_str());
+            return "";
+        }
+    } else {
         speak_and_play("请先注册声纹，输入 enroll 开始注册");
-        std::remove(wav_file.c_str());
-        return "";
-    }
-
-    if (!speaker_.verify(wav_file)) {
-        speak_and_play("声纹验证失败，我无法为您服务");
         std::remove(wav_file.c_str());
         return "";
     }
@@ -310,16 +341,59 @@ bool VoicePipeline::enroll_speaker()
 {
     const std::string wav_file = "temp_enroll.wav";
 
+    std::cout << "   🎙️ 请说出你的名字（3秒后开始录音）..." << std::endl;
+    speak_and_play("请在提示音后说出你的名字");
+
     if (!recorder_.record(wav_file)) {
         return false;
     }
 
-    if (!speaker_.enroll(wav_file)) {
+    // 先用 ASR 获取用户名
+    std::string user_name = asr_.transcribe(wav_file);
+    if (user_name.empty()) {
+        speak_and_play("没有识别到你说的名字，请重试");
         std::remove(wav_file.c_str());
         return false;
     }
 
-    speak_and_play("声纹注册完成！现在只有你可以命令我啦！");
+    // 清理用户名（过滤中文标点和空格）
+    std::string clean_name;
+    for (size_t i = 0; i < user_name.size(); ) {
+        unsigned char c = (unsigned char)user_name[i];
+        // 跳过 ASCII 空格
+        if (c == ' ') { i++; continue; }
+        // 跳过 UTF-8 中文标点（3字节序列）
+        if (c == 0xE3 || c == 0xEF) {
+            i += 3;
+            continue;
+        }
+        clean_name += user_name[i];
+        i++;
+    }
+
+    // 重新录音（用于声纹注册，建议 >3 秒）
+    std::cout << "   🎙️ 请说一段话（用于声纹注册，3秒后开始）..." << std::endl;
+    speak_and_play("请说一小段话，用于声纹注册");
+    std::remove(wav_file.c_str());
+
+    if (!recorder_.record(wav_file)) {
+        return false;
+    }
+
+    // 注册到声纹库
+    if (!voiceprint_.enroll(wav_file, clean_name, clean_name)) {
+        // 降级到旧版单用户注册
+        if (!speaker_.enroll(wav_file)) {
+            std::remove(wav_file.c_str());
+            return false;
+        }
+        speak_and_play("声纹注册完成！");
+    } else {
+        std::string msg = "声纹注册完成！欢迎你，" + clean_name;
+        speak_and_play(msg);
+    }
+
+    std::remove(wav_file.c_str());
     return true;
 }
 
@@ -602,15 +676,29 @@ void VoicePipeline::process_loop()
             continue;
         }
 
-        // 3) 唤醒词检查（可选的）
-        // 交互模式下默认跳过唤醒词检查（已经是全双工对话了）
-        // 如果配置了唤醒词且非空，仍然检查
+        // 3) 唤醒词检查（可选的）／声纹识别
         if (kws_.enabled() && !kws_.detect(prompt)) {
             std::cout << "   ⚠️ 未检测到唤醒词，跳过" << std::endl;
             continue;
         }
 
+        // 声纹识别（交互模式中可选，仅在声纹库有用户时启用）
+        if (voiceprint_.has_any() && !seg.samples.empty()) {
+            const std::string vp_wav = "temp_vp_" + std::to_string(my_gen) + ".wav";
+            if (write_wav_float(vp_wav, seg.samples, 16000)) {
+                auto id = voiceprint_.identify(vp_wav);
+                std::remove(vp_wav.c_str());
+                if (id.identified()) {
+                    if (id.name != voiceprint_.active_speaker()) {
+                        voiceprint_.set_active_speaker(id.name);
+                    }
+                }
+            }
+        }
+
         // 4) 推理（ReAct → Function Calling → 关键字匹配）
+        // 获取活跃用户的 system prompt（声纹识别出的用户）
+        std::string speaker_prompt = voiceprint_.active_system_prompt();
         std::string context = memory_.get_context();
         std::string reply;
 
@@ -630,6 +718,9 @@ void VoicePipeline::process_loop()
         if (reply.empty()) {
             SkillResult sr = skill_mgr_.detect_and_execute(prompt);
             std::string extra = SkillManager::get_system_context();
+            if (!speaker_prompt.empty()) {
+                extra = speaker_prompt + "\n" + extra;
+            }
             if (sr.hit) {
                 extra += "\n" + sr.result_text;
                 std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;

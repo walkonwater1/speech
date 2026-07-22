@@ -63,3 +63,7 @@ out_answer/
 
 # Third-party downloaded binaries (sherpa-onnx)
 src/third_party/
+
+# Voiceprint library (runtime data)
+speaker_voice_library/
+voiceprint_library/
