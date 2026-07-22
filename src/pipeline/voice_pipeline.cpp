@@ -188,7 +188,7 @@ std::string VoicePipeline::process_text(const std::string& text)
     }
 
     memory_.add(text, reply);
-    speak_and_play(reply);
+    speak_and_play(reply, text);
 
     return reply;
 }
@@ -278,7 +278,7 @@ std::string VoicePipeline::process_voice()
     }
 
     memory_.add(prompt, reply);
-    speak_and_play(reply);
+    speak_and_play(reply, prompt);
 
     return reply;
 }
@@ -306,17 +306,18 @@ void VoicePipeline::clear_memory()
     std::cout << "   🧹 对话记忆已清空" << std::endl;
 }
 
-void VoicePipeline::speak_and_play(const std::string& text)
+void VoicePipeline::speak_and_play(const std::string& text,
+                                     const std::string& user_context)
 {
     std::cout << "   🔊 播放中..." << std::endl;
 
     if (cfg_.tts_backend == "piper") {
         // Piper 流式管道：合成 + 播放一气呵成（边生成边播）
-        tts_.synthesize(text, "");
+        tts_.synthesize(text, "", user_context);
     } else {
         // espeak：先合成到 WAV，再播放
         const std::string tts_file = "temp_reply.wav";
-        if (tts_.synthesize(text, tts_file)) {
+        if (tts_.synthesize(text, tts_file, user_context)) {
             AudioPlayer::play(tts_file);
             std::remove(tts_file.c_str());
         }
@@ -594,11 +595,11 @@ void VoicePipeline::process_loop()
             // Piper 流式管道：边合成边播，阻塞直到播完
             std::cout << "   🔊 播放中..." << std::endl;
             is_playing_ = true;
-            tts_.synthesize(reply, "");
+            tts_.synthesize(reply, "", prompt);
             is_playing_ = false;
         } else {
             const std::string tts_file = "temp_reply_interactive_" + std::to_string(my_gen) + ".wav";
-            if (!tts_.synthesize(reply, tts_file)) {
+            if (!tts_.synthesize(reply, tts_file, prompt)) {
                 std::cerr << "   ❌ TTS 合成失败" << std::endl;
                 continue;
             }

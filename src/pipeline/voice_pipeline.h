@@ -99,7 +99,8 @@ private:
     bool initialized_ = false;
 
     /// TTS 合成 + 播放（单次模式使用）
-    void speak_and_play(const std::string& text);
+    void speak_and_play(const std::string& text,
+                         const std::string& user_context = "");
 
     // ── 交互模式内部状态 ─────────────────────────
 

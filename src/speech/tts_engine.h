@@ -11,6 +11,8 @@
 #include <string>
 #include <cstdio>
 
+class ProsodyController;
+
 class TTSEngine {
 public:
     /// @param rate        espeak 语速
@@ -30,9 +32,11 @@ public:
     bool initialize();
 
     /// 文字 → 音频播放
-    /// @param text        待合成文本 (UTF-8)
-    /// @param output_path 输出 WAV 路径（espeak 后端使用，Piper 忽略）
-    bool synthesize(const std::string& text, const std::string& output_path);
+    /// @param text         待合成文本 (UTF-8)
+    /// @param output_path  输出 WAV 路径（espeak 后端使用，Piper 忽略）
+    /// @param user_context 用户原始输入（用于韵律分析，可选）
+    bool synthesize(const std::string& text, const std::string& output_path,
+                    const std::string& user_context = "");
 
 private:
     int rate_;
@@ -58,4 +62,8 @@ private:
 
     /// 从 piper_out_ 读取指定长度数据
     bool read_exact(void* buf, size_t len);
+
+    // 韵律控制
+    class ProsodyController* prosody_ = nullptr;
+    bool prosody_enabled_ = true;
 };

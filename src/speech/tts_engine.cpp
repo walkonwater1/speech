@@ -6,6 +6,7 @@
  */
 
 #include "tts_engine.h"
+#include "prosody.h"
 
 #include "espeak_min.h"
 #include <fstream>
@@ -418,10 +419,17 @@ TTSEngine::TTSEngine(int rate, const std::string& voice,
     if (!piper_model_.empty()) {
         piper_model_ = expand_tilde(piper_model_);
     }
+
+    ProsodyConfig pcfg;
+    pcfg.base_rate = rate;
+    pcfg.min_rate  = rate * 70 / 100;
+    pcfg.max_rate  = rate * 140 / 100;
+    prosody_ = new ProsodyController(pcfg);
 }
 
 TTSEngine::~TTSEngine()
 {
+    delete prosody_;
     if (backend_ == "piper") {
         shutdown_piper();
     }
@@ -439,14 +447,36 @@ bool TTSEngine::initialize()
     }
 }
 
-bool TTSEngine::synthesize(const std::string& text, const std::string& output_path)
+bool TTSEngine::synthesize(const std::string& text, const std::string& output_path,
+                            const std::string& user_context)
 {
     if (!initialized_) return false;
 
+    // ── 韵律分析：从用户输入检测情感 → 调整语速 + 增强回复文本 ──
+    std::string synth_text = text;
+    if (prosody_ && prosody_enabled_) {
+        // 用用户输入（而非 LLM 回复）来分析情感
+        auto prosody = prosody_->analyze(
+            user_context.empty() ? text : user_context,  // 主要信号：用户说了什么
+            text);  // 次要信号：LLM 回复（用于标点增强）
+
+        synth_text = prosody.enhanced_text;
+
+        if (backend_ != "piper") {
+            espeak_SetParameter(espeakRATE, prosody.adjusted_rate, 0);
+            rate_ = prosody.adjusted_rate;
+        }
+
+        std::cout << "   [韵律] " << prosody.tone_label
+                  << " → 语速" << prosody.adjusted_rate
+                  << " (" << (backend_ == "piper" ? "标点增强" : "espeak")
+                  << ")" << std::endl;
+    }
+
     if (backend_ == "piper") {
-        return synthesize_piper(text, output_path);
+        return synthesize_piper(synth_text, output_path);
     } else {
-        return synthesize_espeak(text, output_path);
+        return synthesize_espeak(synth_text, output_path);
     }
 }
 
@@ -573,11 +603,8 @@ bool TTSEngine::init_piper()
         unsetenv("LD_LIBRARY_PATH");
         setenv("HF_ENDPOINT", "https://hf-mirror.com", 1);
 
-        // 传递音素模式环境变量
-        const char* phoneme_mode = std::getenv("PIPER_PHONEME_MODE");
-        if (phoneme_mode && phoneme_mode[0]) {
-            setenv("PIPER_PHONEME_MODE", phoneme_mode, 1);
-        }
+        // 默认使用 g2pw 精准音素模式（多音字消歧），可通过环境变量覆盖
+        setenv("PIPER_PHONEME_MODE", "accurate", 0);  // 0 = 不覆盖已有值
 
         execlp(python.c_str(), python.c_str(), "-u",
                piper_script_.c_str(), piper_model_.c_str(), nullptr);

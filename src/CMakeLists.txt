@@ -87,6 +87,7 @@ set(HEADERS
 
     audio/audio_io.h
     audio/vad.h
+    speech/prosody.h
     audio/denoiser.h
 )
 
