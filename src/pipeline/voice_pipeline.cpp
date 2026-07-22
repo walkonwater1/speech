@@ -560,6 +560,11 @@ void VoicePipeline::reload_config(const PipelineConfig& new_cfg)
     if (diff_val("ma_max_rounds", cfg_.ma_max_rounds, new_cfg.ma_max_rounds, cfg_.ma_max_rounds))
         hot_changes++;
 
+    // 交互模式
+    diff_val("barge_in_enabled", cfg_.barge_in_enabled, new_cfg.barge_in_enabled, cfg_.barge_in_enabled);
+    diff_val("barge_in_energy_ratio", cfg_.barge_in_energy_ratio, new_cfg.barge_in_energy_ratio, cfg_.barge_in_energy_ratio);
+    diff_val("max_response_chars", cfg_.max_response_chars, new_cfg.max_response_chars, cfg_.max_response_chars);
+
     // VAD 参数（capture_loop 每帧读取 cfg_）
     diff_val("vad_energy_threshold", cfg_.vad_energy_threshold, new_cfg.vad_energy_threshold, cfg_.vad_energy_threshold);
     diff_val("vad_min_speech_frames", cfg_.vad_min_speech_frames, new_cfg.vad_min_speech_frames, cfg_.vad_min_speech_frames);
@@ -761,8 +766,11 @@ void VoicePipeline::capture_loop()
     // 音频预处理器: 去直流偏置 + 噪声门
     Denoiser denoiser(16000);
 
-    // 播放状态跟踪（用于播放结束后 VAD 重置）
+    // 播放状态跟踪 + 打断检测
     bool was_playing = false;
+    float echo_baseline  = 0.0f;      // 回声能量基线
+    int   echo_frames    = 0;         // 基线学习帧数
+    int   barge_in_frames = 0;        // 连续高于基线的帧数
 
     std::cout << "🎙️  麦克风已开启，开始监听... (VAD: " << cfg_.vad_backend << ")" << std::endl;
 
@@ -817,6 +825,53 @@ void VoicePipeline::capture_loop()
             speech_timeout = true;
         }
 
+        // ── 打断检测：播放中检测用户语音 → 停止播放 ────
+        if (cfg_.barge_in_enabled && playing) {
+            // 计算当前帧 RMS
+            float rms = 0.0f;
+            for (int i = 0; i < frame_samples; ++i)
+                rms += float_buf[i] * float_buf[i];
+            rms = std::sqrt(rms / frame_samples);
+
+            // 前 500ms 学习回声基线，不允许打断
+            if (echo_frames < 25) {
+                echo_baseline = (echo_baseline * echo_frames + rms) / (echo_frames + 1);
+                echo_frames++;
+                barge_in_frames = 0;
+            } else if (rms > echo_baseline * cfg_.barge_in_energy_ratio) {
+                // 能量显著高于回声基线 → 可能是用户语音
+                barge_in_frames++;
+            } else {
+                // 更新回声基线（慢速自适应）
+                echo_baseline = echo_baseline * 0.95f + rms * 0.05f;
+                barge_in_frames = 0;
+            }
+
+            // 持续 300ms（15 帧）高于基线 → 触发打断
+            if (barge_in_frames > 15) {
+                pid_t pid = player_pid_.exchange(-1);
+                if (pid > 0) {
+                    AudioPlayer::stop_async(pid);
+                    LOG_INFO("\n🔴 检测到真实语音，已打断当前播放！");
+                }
+                // 关键：立即允许 capture 线程收集新语音
+                is_playing_ = false;
+                process_busy_ = false;
+                playing = false;
+                barge_in_frames = 0;
+                echo_frames = 0;
+                // 重置 VAD + ASR 以捕获打断语音
+                vad->reset();
+                if (stream_asr_.initialized()) {
+                    stream_asr_.cancel();
+                    stream_asr_.start_utterance();
+                }
+            }
+        } else {
+            barge_in_frames = 0;
+            echo_frames = 0;
+        }
+
         // 语音段结束 → 入队（仅当 process 空闲时）
         if ((vad->segment_ready() || speech_timeout) && !busy) {
             auto segment = vad->pop_segment();
@@ -868,6 +923,17 @@ void VoicePipeline::capture_loop()
                     }
                     if (all_ascii && stream_text.size() <= 6) {
                         is_garbage = true;
+                    }
+                }
+                // 日语假名检测（ひらがな/カタカナ）→ SenseVoice 误判语言
+                else if (!is_garbage) {
+                    for (size_t i = 0; i + 2 < stream_text.size(); ++i) {
+                        unsigned char b0 = stream_text[i];
+                        unsigned char b1 = stream_text[i+1];
+                        if (b0 == 0xE3 && b1 >= 0x81 && b1 <= 0x83) {
+                            is_garbage = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -1046,7 +1112,25 @@ void VoicePipeline::process_loop()
             reply = r.improved;
         }
 
-        // 6) 更新记忆
+        // 6) 回复截断
+        if (cfg_.max_response_chars > 0 && (int)reply.size() > cfg_.max_response_chars * 3) {
+            size_t cut = (size_t)cfg_.max_response_chars * 3;
+            for (size_t off = 0; off < 60 && cut + off < reply.size(); off++) {
+                size_t pos = cut + off;
+                if (pos + 2 < reply.size() && (unsigned char)reply[pos] == 0xE3) {
+                    unsigned char c1 = reply[pos+1], c2 = reply[pos+2];
+                    if ((c1 == 0x80 && c2 == 0x82) ||   // 。
+                        (c1 == 0xBC && c2 == 0x81) ||    // ！
+                        (c1 == 0xBC && c2 == 0x9F)) {    // ？
+                        reply = reply.substr(0, pos + 3);
+                        std::cout << "   ✂️  回复截断为 " << reply.size()/3 << " 字" << std::endl;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 7) 更新记忆
         memory_.add(prompt, reply);
 
         // 7) TTS + 播放（传递声学情感用于韵律融合）

@@ -102,6 +102,14 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(v, "cooldown_frames",    vad_cooldown_frames);
     }
 
+    // ── 交互模式 ───────────────────────────────────
+    if (j.contains("interactive")) {
+        auto& it = j["interactive"];
+        try_get(it, "barge_in_enabled",      barge_in_enabled);
+        try_get(it, "barge_in_energy_ratio", barge_in_energy_ratio);
+        try_get(it, "max_response_chars",    max_response_chars);
+    }
+
     // ── 对话记忆 ───────────────────────────────────
     if (j.contains("memory")) {
         auto& m = j["memory"];

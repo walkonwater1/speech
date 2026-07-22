@@ -20,7 +20,7 @@ struct PipelineConfig {
     // ── LLM ────────────────────────────────────────
     std::string ollama_host   = "http://127.0.0.1:11434";
     std::string llm_model     = "qwen2.5:1.5b";
-    std::string system_prompt = "你叫小千，是一个18岁的女大学生，性格活泼开朗。回答简洁有趣，不超过50字。";
+    std::string system_prompt = "你叫小千，是一个18岁的女大学生，性格活泼开朗。回答简洁有趣，不超过50字。只使用中文回答，不要用日语或任何其他语言。";
 
     // ── TTS ────────────────────────────────────────
     int         tts_rate         = 200;                           // espeak 语速 (词/分钟)
@@ -48,9 +48,14 @@ struct PipelineConfig {
     float vad_min_energy         = 0.002f;   // 绝对最小能量阈值（仅 adaptive 模式）
     int   vad_cooldown_frames    = 25;       // 语音段结束后强制静音帧数 (~500ms)
 
+    // ── 交互模式 ───────────────────────────────────
+    bool  barge_in_enabled      = true;    // 播放时允许语音打断
+    float barge_in_energy_ratio = 2.0f;    // 打断能量倍数（当前帧/回声基线 > 此值触发）
+    int   max_response_chars    = 80;      // 回复最大字数（超出截断），0=不限制
+
     // ── 对话记忆 ───────────────────────────────────
-    int max_rounds = 10;
-    int max_tokens = 512;
+    int max_rounds = 5;
+    int max_tokens = 1024;
 
     // ── 技能 ───────────────────────────────────────
     bool skill_weather    = true;
