@@ -335,10 +335,8 @@ void VoicePipeline::speak_and_play(const std::string& text,
     std::cout << "   🔊 播放中..." << std::endl;
 
     if (cfg_.tts_backend == "piper") {
-        // Piper 流式管道：合成 + 播放一气呵成（边生成边播）
         tts_.synthesize(text, "", user_context);
     } else {
-        // espeak：先合成到 WAV，再播放
         const std::string tts_file = "temp_reply.wav";
         if (tts_.synthesize(text, tts_file, user_context)) {
             AudioPlayer::play(tts_file);
@@ -516,11 +514,25 @@ void VoicePipeline::capture_loop()
                           << " (" << duration << "s)" << std::endl;
             }
 
+            // ── 声学情感分析 (Layer 3.3) ──────────────────
+            VoiceEmotionResult voice_emo;
+            if (!segment.empty()) {
+                voice_emo = voice_emo_.analyze(
+                    segment.data(), (int)segment.size(), 16000);
+                if (voice_emo.confidence > 0.0f) {
+                    std::cout << "   🎭 " << voice_emo.label
+                              << " (" << voice_emo.detail << ")"
+                              << " 置信度=" << (int)(voice_emo.confidence * 100) << "%"
+                              << std::endl;
+                }
+            }
+
             {
                 std::lock_guard<std::mutex> lk(queue_mutex_);
                 Segment seg;
                 seg.samples    = std::move(segment);
                 seg.text       = stream_text;   // 预识别文本
+                seg.voice_emo  = voice_emo;     // 声学情感
                 seg.generation = gen;
                 segment_queue_.push(std::move(seg));
             }
@@ -649,16 +661,17 @@ void VoicePipeline::process_loop()
         // 6) 更新记忆
         memory_.add(prompt, reply);
 
-        // 7) TTS + 播放
+        // 7) TTS + 播放（传递声学情感用于韵律融合）
+        const VoiceEmotionResult* ve = seg.voice_emo.confidence > 0.0f ? &seg.voice_emo : nullptr;
         if (cfg_.tts_backend == "piper") {
             // Piper 流式管道：边合成边播，阻塞直到播完
             std::cout << "   🔊 播放中..." << std::endl;
             is_playing_ = true;
-            tts_.synthesize(reply, "", prompt);
+            tts_.synthesize(reply, "", prompt, ve);
             is_playing_ = false;
         } else {
             const std::string tts_file = "temp_reply_interactive_" + std::to_string(my_gen) + ".wav";
-            if (!tts_.synthesize(reply, tts_file, prompt)) {
+            if (!tts_.synthesize(reply, tts_file, prompt, ve)) {
                 std::cerr << "   ❌ TTS 合成失败" << std::endl;
                 continue;
             }

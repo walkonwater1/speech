@@ -90,11 +90,17 @@ set(HEADERS
     audio/audio_io.h
     audio/vad.h
     speech/prosody.h
+    speech/voice_emotion.h
     audio/denoiser.h
 )
 
 # ── 可执行文件 ────────────────────────────────────────
 add_executable(voice_pipeline main.cpp ${SOURCES} ${HEADERS})
+
+# 语音情感分析独立测试
+add_executable(test_voice_emotion test_voice_emotion.cpp)
+target_include_directories(test_voice_emotion PRIVATE
+    ${CMAKE_SOURCE_DIR}/speech)
 
 # 流式 ASR 独立测试
 add_executable(test_streaming test_streaming_asr.cpp

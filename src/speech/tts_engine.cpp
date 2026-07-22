@@ -448,29 +448,59 @@ bool TTSEngine::initialize()
 }
 
 bool TTSEngine::synthesize(const std::string& text, const std::string& output_path,
-                            const std::string& user_context)
+                            const std::string& user_context,
+                            const VoiceEmotionResult* voice_emo)
 {
     if (!initialized_) return false;
 
-    // ── 韵律分析：从用户输入检测情感 → 调整语速 + 增强回复文本 ──
+    // ── 韵律分析：文本情感 + 声学情感 → 融合 → 调整语速 + 增强文本 ──
     std::string synth_text = text;
     if (prosody_ && prosody_enabled_) {
-        // 用用户输入（而非 LLM 回复）来分析情感
+        // 1) 文本情感检测
         auto prosody = prosody_->analyze(
             user_context.empty() ? text : user_context,  // 主要信号：用户说了什么
             text);  // 次要信号：LLM 回复（用于标点增强）
 
+        // 2) 如果有声学情感 → 融合
+        if (voice_emo && voice_emo->confidence > 0.0f) {
+            int text_tone_id = 0;
+            switch (prosody.tone) {
+            case EmotionTone::HAPPY:      text_tone_id = 1; break;
+            case EmotionTone::SAD:        text_tone_id = 2; break;
+            case EmotionTone::EMPATHETIC: text_tone_id = 3; break;
+            case EmotionTone::URGENT:     text_tone_id = 4; break;
+            default: break;
+            }
+
+            auto fusion = fuse_emotions(*voice_emo, text_tone_id);
+
+            // 融合后的语调 → 覆盖文本检测结果
+            switch (fusion.tone_id) {
+            case 1: prosody.tone = EmotionTone::HAPPY;      break;
+            case 2: prosody.tone = EmotionTone::SAD;        break;
+            case 3: prosody.tone = EmotionTone::EMPATHETIC; break;
+            case 4: prosody.tone = EmotionTone::URGENT;     break;
+            default: prosody.tone = EmotionTone::NEUTRAL;   break;
+            }
+            prosody.adjusted_rate = prosody_->rate_for_tone(prosody.tone);
+            prosody.tone_label    = prosody_->label_for_tone(prosody.tone);
+
+            std::cout << "   [韵律] 🎤 " << fusion.diagnostic
+                      << " → 语速" << prosody.adjusted_rate << std::endl;
+        } else {
+            std::cout << "   [韵律] " << prosody.tone_label
+                      << " → 语速" << prosody.adjusted_rate
+                      << " (纯文本检测)" << std::endl;
+        }
+
+        // 3) 文本增强（标点）
         synth_text = prosody.enhanced_text;
 
+        // 4) 设置 espeak 语速
         if (backend_ != "piper") {
             espeak_SetParameter(espeakRATE, prosody.adjusted_rate, 0);
             rate_ = prosody.adjusted_rate;
         }
-
-        std::cout << "   [韵律] " << prosody.tone_label
-                  << " → 语速" << prosody.adjusted_rate
-                  << " (" << (backend_ == "piper" ? "标点增强" : "espeak")
-                  << ")" << std::endl;
     }
 
     if (backend_ == "piper") {

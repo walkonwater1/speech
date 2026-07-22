@@ -50,6 +50,7 @@
 #include "reflection.h"
 #include "multi_agent.h"
 #include "streaming_asr.h"
+#include "voice_emotion.h"
 
 class VoicePipeline {
 public:
@@ -97,6 +98,7 @@ private:
     std::shared_ptr<ReflectionEngine>  reflect_;     // 回复反思修正
     std::shared_ptr<MultiAgentEngine> multi_agent_; // 双Agent协作
     StreamingASR      stream_asr_;    // 流式 ASR (Layer 3.2)
+    VoiceEmotionAnalyzer voice_emo_;  // 声学情感分析 (Layer 3.3)
 
     bool initialized_ = false;
 
@@ -120,6 +122,7 @@ private:
     struct Segment {
         std::vector<float> samples;
         std::string text;       // 流式 ASR 预识别文本（非空时跳过 process_loop 中的 ASR）
+        VoiceEmotionResult voice_emo;  // 声学情感（Layer 3.3）
         int generation;
     };
     std::queue<Segment>     segment_queue_;

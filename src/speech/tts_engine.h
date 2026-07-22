@@ -10,6 +10,7 @@
 
 #include <string>
 #include <cstdio>
+#include "voice_emotion.h"
 
 class ProsodyController;
 
@@ -35,8 +36,10 @@ public:
     /// @param text         待合成文本 (UTF-8)
     /// @param output_path  输出 WAV 路径（espeak 后端使用，Piper 忽略）
     /// @param user_context 用户原始输入（用于韵律分析，可选）
+    /// @param voice_emo    声学情感分析结果（Layer 3.3，可选）
     bool synthesize(const std::string& text, const std::string& output_path,
-                    const std::string& user_context = "");
+                    const std::string& user_context = "",
+                    const VoiceEmotionResult* voice_emo = nullptr);
 
 private:
     int rate_;
