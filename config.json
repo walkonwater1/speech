@@ -47,6 +47,11 @@
     "enabled": true,
     "model": "qwen2.5:0.5b"
   },
+  "multi_agent": {
+    "enabled": true,
+    "critic_model": "qwen2.5:0.5b",
+    "max_rounds": 2
+  },
   "skills": {
     "weather": { "enabled": true },
     "time": { "enabled": true },

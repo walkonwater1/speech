@@ -44,6 +44,7 @@ set(SOURCES
     llm/function_caller.cpp
     llm/react_engine.cpp
     llm/reflection.cpp
+    llm/multi_agent.cpp
 
     memory/chat_memory.cpp
     memory/document_chunker.cpp
@@ -78,6 +79,7 @@ set(HEADERS
     llm/function_caller.h
     llm/react_engine.h
     llm/reflection.h
+    llm/multi_agent.h
 
     memory/chat_memory.h
     memory/vector_store.h

@@ -48,6 +48,7 @@
 #include "function_caller.h"
 #include "react_engine.h"
 #include "reflection.h"
+#include "multi_agent.h"
 
 class VoicePipeline {
 public:
@@ -92,7 +93,8 @@ private:
     std::shared_ptr<EmbeddingEngine> embed_;  // RAG 共用
     std::shared_ptr<FunctionCaller> fc_;      // Function Calling
     std::shared_ptr<ReActEngine>       react_;    // ReAct 多步推理
-    std::shared_ptr<ReflectionEngine> reflect_;  // 回复反思修正
+    std::shared_ptr<ReflectionEngine>  reflect_;     // 回复反思修正
+    std::shared_ptr<MultiAgentEngine> multi_agent_; // 双Agent协作
 
     bool initialized_ = false;
 

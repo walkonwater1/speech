@@ -103,6 +103,17 @@ bool VoicePipeline::initialize()
         std::cout << "[Reflect] 禁用" << std::endl;
     }
 
+    // ── 初始化 Multi-Agent ───────────────────────────
+    if (cfg_.multi_agent_enabled) {
+        std::string cmodel = cfg_.ma_critic_model.empty()
+            ? cfg_.llm_model : cfg_.ma_critic_model;
+        std::cout << "[MultiAgent] 🤝 启用双 Agent 协作 (Critic: "
+                  << cmodel << ", 最多" << cfg_.ma_max_rounds << "轮)" << std::endl;
+        multi_agent_ = std::make_shared<MultiAgentEngine>(cfg_.ollama_host);
+    } else {
+        std::cout << "[MultiAgent] 禁用" << std::endl;
+    }
+
     std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
@@ -163,8 +174,15 @@ std::string VoicePipeline::process_text(const std::string& text)
 
     if (reply.empty()) return "";
 
-    // ── Reflection: 自我审查与修正 ───────────────────
-    if (reflect_) {
+    // ── 质量优化：Multi-Agent 协作 或 Reflection 反思 ──
+    if (multi_agent_) {
+        std::string cmodel = cfg_.ma_critic_model.empty()
+            ? cfg_.llm_model : cfg_.ma_critic_model;
+        auto ma = multi_agent_->collaborate(
+            text, reply, /*tool_context*/"",
+            cfg_.system_prompt, cfg_.llm_model, cmodel, cfg_.ma_max_rounds);
+        reply = ma.final_answer;
+    } else if (reflect_) {
         auto r = reflect_->reflect(text, reply);
         reply = r.improved;
     }
@@ -246,8 +264,15 @@ std::string VoicePipeline::process_voice()
 
     if (reply.empty()) return "";
 
-    // ── Reflection ───────────────────────────────────
-    if (reflect_) {
+    // ── 质量优化 ───────────────────────────────────
+    if (multi_agent_) {
+        std::string cmodel = cfg_.ma_critic_model.empty()
+            ? cfg_.llm_model : cfg_.ma_critic_model;
+        auto ma = multi_agent_->collaborate(
+            prompt, reply, "", cfg_.system_prompt,
+            cfg_.llm_model, cmodel, cfg_.ma_max_rounds);
+        reply = ma.final_answer;
+    } else if (reflect_) {
         auto r = reflect_->reflect(prompt, reply);
         reply = r.improved;
     }
@@ -548,8 +573,15 @@ void VoicePipeline::process_loop()
             continue;
         }
 
-        // 5.5) Reflection: 自我审查与修正
-        if (reflect_) {
+        // 5.5) 质量优化：Multi-Agent 或 Reflection
+        if (multi_agent_) {
+            std::string cmodel = cfg_.ma_critic_model.empty()
+                ? cfg_.llm_model : cfg_.ma_critic_model;
+            auto ma = multi_agent_->collaborate(
+                prompt, reply, "", cfg_.system_prompt,
+                cfg_.llm_model, cmodel, cfg_.ma_max_rounds);
+            reply = ma.final_answer;
+        } else if (reflect_) {
             auto r = reflect_->reflect(prompt, reply);
             reply = r.improved;
         }

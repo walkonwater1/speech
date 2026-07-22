@@ -69,6 +69,11 @@ struct PipelineConfig {
     bool reflect_enabled = true;           // 启用回复后反思修正
     std::string reflect_model = "";        // 反思模型（空=复用 llm_model）
 
+    // ── Multi-Agent (双Agent协作) ─────────────────────
+    bool multi_agent_enabled = true;       // 启用双 Agent 协作优化
+    std::string ma_critic_model = "";      // Critic 模型（空=复用 llm_model）
+    int  ma_max_rounds = 2;               // 最大协作轮数
+
     // ── 文件加载 ───────────────────────────────────
 
     /// 从 JSON 文件加载配置（未出现在文件中的键保持默认值）

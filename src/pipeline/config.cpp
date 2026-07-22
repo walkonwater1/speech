@@ -127,6 +127,14 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(r, "model",   reflect_model);
     }
 
+    // ── Multi-Agent ──────────────────────────────────
+    if (j.contains("multi_agent")) {
+        auto& m = j["multi_agent"];
+        try_get(m, "enabled",       multi_agent_enabled);
+        try_get(m, "critic_model",  ma_critic_model);
+        try_get(m, "max_rounds",    ma_max_rounds);
+    }
+
     // ── 技能 ────────────────────────────────────────
     if (j.contains("skills")) {
         auto& s = j["skills"];
