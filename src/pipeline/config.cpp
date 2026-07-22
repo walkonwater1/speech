@@ -120,6 +120,13 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(r, "max_steps",  react_max_steps);
     }
 
+    // ── Reflection ───────────────────────────────────
+    if (j.contains("reflection")) {
+        auto& r = j["reflection"];
+        try_get(r, "enabled", reflect_enabled);
+        try_get(r, "model",   reflect_model);
+    }
+
     // ── 技能 ────────────────────────────────────────
     if (j.contains("skills")) {
         auto& s = j["skills"];

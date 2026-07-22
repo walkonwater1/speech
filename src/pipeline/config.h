@@ -65,6 +65,10 @@ struct PipelineConfig {
     bool react_enabled  = true;            // 启用 ReAct 多步推理
     int  react_max_steps = 5;              // 最大推理步数
 
+    // ── Reflection (自我反思) ─────────────────────────
+    bool reflect_enabled = true;           // 启用回复后反思修正
+    std::string reflect_model = "";        // 反思模型（空=复用 llm_model）
+
     // ── 文件加载 ───────────────────────────────────
 
     /// 从 JSON 文件加载配置（未出现在文件中的键保持默认值）

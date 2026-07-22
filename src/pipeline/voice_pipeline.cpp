@@ -92,6 +92,17 @@ bool VoicePipeline::initialize()
         std::cout << "[ReAct] 禁用，使用单步推理" << std::endl;
     }
 
+    // ── 初始化 Reflection 反思 ────────────────────────
+    if (cfg_.reflect_enabled) {
+        std::string rmodel = cfg_.reflect_model.empty()
+            ? cfg_.llm_model : cfg_.reflect_model;
+        std::cout << "[Reflect] 🔍 启用回复反思修正 (模型: "
+                  << rmodel << ")" << std::endl;
+        reflect_ = std::make_shared<ReflectionEngine>(cfg_.ollama_host, rmodel);
+    } else {
+        std::cout << "[Reflect] 禁用" << std::endl;
+    }
+
     std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
@@ -130,30 +141,33 @@ std::string VoicePipeline::process_text(const std::string& text)
 
             if (result.success && !result.final_answer.empty()) {
                 reply = result.final_answer;
-                memory_.add(text, reply);
-                speak_and_play(reply);
-                return reply;
-            }
-
-            // ReAct 失败 → 降级
-            if (!result.success) {
+                // 不在此处返回，继续到下方 reflection + memory
+            } else if (!result.success) {
                 std::cout << "   [ReAct] 推理失败，降级到单步模式" << std::endl;
             }
         }
     }
 
     // ── 策略 2: Function Calling + LLM（降级方案）─────
-    SkillResult sr = skill_mgr_.detect_and_execute(text);
-    std::string extra = SkillManager::get_system_context();
-    if (sr.hit) {
-        extra += "\n" + sr.result_text;
-        std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+    if (reply.empty()) {
+        SkillResult sr = skill_mgr_.detect_and_execute(text);
+        std::string extra = SkillManager::get_system_context();
+        if (sr.hit) {
+            extra += "\n" + sr.result_text;
+            std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+        }
+
+        std::string context = memory_.get_context();
+        reply = llm_.chat(text, context, extra);
     }
 
-    std::string context = memory_.get_context();
-    reply = llm_.chat(text, context, extra);
-
     if (reply.empty()) return "";
+
+    // ── Reflection: 自我审查与修正 ───────────────────
+    if (reflect_) {
+        auto r = reflect_->reflect(text, reply);
+        reply = r.improved;
+    }
 
     memory_.add(text, reply);
     speak_and_play(reply);
@@ -213,24 +227,30 @@ std::string VoicePipeline::process_voice()
 
             if (result.success && !result.final_answer.empty()) {
                 reply = result.final_answer;
-                memory_.add(prompt, reply);
-                speak_and_play(reply);
-                return reply;
             }
         }
     }
 
     // ── 降级：Function Calling → 关键字匹配 ─────────
-    SkillResult sr = skill_mgr_.detect_and_execute(prompt);
-    std::string extra = SkillManager::get_system_context();
-    if (sr.hit) {
-        extra += "\n" + sr.result_text;
-        std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+    if (reply.empty()) {
+        SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+        std::string extra = SkillManager::get_system_context();
+        if (sr.hit) {
+            extra += "\n" + sr.result_text;
+            std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+        }
+
+        std::string context = memory_.get_context();
+        reply = llm_.chat(prompt, context, extra);
     }
 
-    std::string context = memory_.get_context();
-    reply = llm_.chat(prompt, context, extra);
     if (reply.empty()) return "";
+
+    // ── Reflection ───────────────────────────────────
+    if (reflect_) {
+        auto r = reflect_->reflect(prompt, reply);
+        reply = r.improved;
+    }
 
     memory_.add(prompt, reply);
     speak_and_play(reply);
@@ -526,6 +546,12 @@ void VoicePipeline::process_loop()
         if (my_gen < generation_.load()) {
             std::cout << "   ⏭️ 语音段 #" << my_gen << " 在推理后过期，丢弃回复" << std::endl;
             continue;
+        }
+
+        // 5.5) Reflection: 自我审查与修正
+        if (reflect_) {
+            auto r = reflect_->reflect(prompt, reply);
+            reply = r.improved;
         }
 
         // 6) 更新记忆

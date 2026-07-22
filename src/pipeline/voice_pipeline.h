@@ -47,6 +47,7 @@
 #include "embedding_engine.h"
 #include "function_caller.h"
 #include "react_engine.h"
+#include "reflection.h"
 
 class VoicePipeline {
 public:
@@ -90,7 +91,8 @@ private:
     AudioRecorder     recorder_;
     std::shared_ptr<EmbeddingEngine> embed_;  // RAG 共用
     std::shared_ptr<FunctionCaller> fc_;      // Function Calling
-    std::shared_ptr<ReActEngine>  react_;     // ReAct 多步推理
+    std::shared_ptr<ReActEngine>       react_;    // ReAct 多步推理
+    std::shared_ptr<ReflectionEngine> reflect_;  // 回复反思修正
 
     bool initialized_ = false;
 
