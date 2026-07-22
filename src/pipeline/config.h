@@ -74,6 +74,13 @@ struct PipelineConfig {
     std::string ma_critic_model = "";      // Critic 模型（空=复用 llm_model）
     int  ma_max_rounds = 2;               // 最大协作轮数
 
+    // ── 流式 ASR ──────────────────────────────────────
+    bool   streaming_asr_enabled = true;            // 启用流式 ASR
+    std::string streaming_asr_backend = "chunked";  // "online" | "chunked"
+    std::string streaming_asr_model  = "";          // online 模型路径（空=复用 asr_model_path）
+    float  streaming_min_chunk  = 0.8f;             // chunked: 最小触发长度 (秒)
+    float  streaming_chunk_intv = 0.5f;             // chunked: 部分识别间隔 (秒)
+
     // ── 文件加载 ───────────────────────────────────
 
     /// 从 JSON 文件加载配置（未出现在文件中的键保持默认值）

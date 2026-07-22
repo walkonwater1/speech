@@ -26,6 +26,7 @@ set(SOURCES
     pipeline/config.cpp
 
     speech/asr_engine.cpp
+    speech/streaming_asr.cpp
     speech/tts_engine.cpp
     speech/wake_word.cpp
     speech/speaker_verifier.cpp
@@ -58,6 +59,7 @@ set(HEADERS
     pipeline/config.h
 
     speech/asr_engine.h
+    speech/streaming_asr.h
     speech/tts_engine.h
     speech/wake_word.h
     speech/speaker_verifier.h
@@ -93,6 +95,24 @@ set(HEADERS
 
 # ── 可执行文件 ────────────────────────────────────────
 add_executable(voice_pipeline main.cpp ${SOURCES} ${HEADERS})
+
+# 流式 ASR 独立测试
+add_executable(test_streaming test_streaming_asr.cpp
+    speech/streaming_asr.cpp
+    speech/asr_engine.cpp)
+target_include_directories(test_streaming PRIVATE
+    ${CMAKE_SOURCE_DIR}/speech
+    ${CMAKE_SOURCE_DIR}/llm
+    ${CURL_INCLUDE_DIRS})
+target_link_libraries(test_streaming PRIVATE
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    pthread)
+if(SHERPA_ONNX_LIB)
+    target_include_directories(test_streaming PRIVATE ${SHERPA_ONNX_INCLUDE})
+    target_link_libraries(test_streaming PRIVATE ${SHERPA_ONNX_LIB})
+    target_compile_definitions(test_streaming PRIVATE SHERPA_ONNX_AVAILABLE)
+endif()
 
 target_include_directories(voice_pipeline PRIVATE
     ${CMAKE_SOURCE_DIR}/pipeline

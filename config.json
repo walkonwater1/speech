@@ -52,6 +52,13 @@
     "critic_model": "qwen2.5:0.5b",
     "max_rounds": 2
   },
+  "streaming_asr": {
+    "enabled": true,
+    "backend": "chunked",
+    "model": "",
+    "min_chunk": 0.8,
+    "chunk_intv": 0.5
+  },
   "skills": {
     "weather": { "enabled": true },
     "time": { "enabled": true },

@@ -135,6 +135,16 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(m, "max_rounds",    ma_max_rounds);
     }
 
+    // ── 流式 ASR ────────────────────────────────────
+    if (j.contains("streaming_asr")) {
+        auto& s = j["streaming_asr"];
+        try_get(s, "enabled",   streaming_asr_enabled);
+        try_get(s, "backend",   streaming_asr_backend);
+        try_get(s, "model",     streaming_asr_model);
+        try_get(s, "min_chunk", streaming_min_chunk);
+        try_get(s, "chunk_intv", streaming_chunk_intv);
+    }
+
     // ── 技能 ────────────────────────────────────────
     if (j.contains("skills")) {
         auto& s = j["skills"];

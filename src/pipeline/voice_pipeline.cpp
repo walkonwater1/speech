@@ -114,6 +114,29 @@ bool VoicePipeline::initialize()
         std::cout << "[MultiAgent] 禁用" << std::endl;
     }
 
+    // ── 初始化流式 ASR (Layer 3.2) ────────────────────
+    if (cfg_.streaming_asr_enabled) {
+        std::string sa_model = cfg_.streaming_asr_model.empty()
+            ? cfg_.asr_model_path : cfg_.streaming_asr_model;
+        std::cout << "[StreamASR] 🎤 流式语音识别 (后端: "
+                  << cfg_.streaming_asr_backend << ")" << std::endl;
+
+        StreamingASRConfig sa_cfg;
+        sa_cfg.backend              = cfg_.streaming_asr_backend;
+        sa_cfg.model_path           = sa_model;
+        sa_cfg.min_chunk_seconds    = cfg_.streaming_min_chunk;
+        sa_cfg.chunk_interval       = cfg_.streaming_chunk_intv;
+
+        if (stream_asr_.initialize(sa_cfg)) {
+            // 设置部分结果回调：实时显示识别文本
+            stream_asr_.set_partial_callback([](const char* text) {
+                std::cout << "   🎤 " << text << "\r" << std::flush;
+            });
+        } else {
+            std::cout << "   ⚠️ 流式 ASR 初始化失败，回退到离线模式" << std::endl;
+        }
+    }
+
     std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
@@ -441,6 +464,17 @@ void VoicePipeline::capture_loop()
         // VAD 处理
         VADState vad_state = vad->process_frame(float_buf.data(), frame_samples);
 
+        // ── 流式 ASR：语音期间持续喂帧 ──────────────────
+        // 注意：只喂语音帧（含 SPEECH_START/ONGOING），
+        // VAD 的 pre_buffer（~300ms 静音）不喂入，影响可忽略
+        bool in_speech = vad->in_speech();
+        if (stream_asr_.initialized() && in_speech) {
+            if (vad_state == VADState::SPEECH_START) {
+                stream_asr_.start_utterance();
+            }
+            stream_asr_.feed(float_buf.data(), frame_samples);
+        }
+
         // 🔴 打断：检测到语音开始 且 正在播放 → 立刻停止播放
         if (vad_state == VADState::SPEECH_START && is_playing_.load()) {
             pid_t pid = player_pid_.exchange(-1);
@@ -449,9 +483,14 @@ void VoicePipeline::capture_loop()
                 std::cout << "\n🔴 检测到语音，已打断当前播放！" << std::endl;
             }
             is_playing_ = false;
+            // 取消旧的流式 ASR（开始新的）
+            if (stream_asr_.initialized()) {
+                stream_asr_.cancel();
+                stream_asr_.start_utterance();
+            }
         }
 
-        // 语音段结束 → 入队
+        // 语音段结束 → 入队（流式 ASR 预识别文字）
         if (vad->segment_ready()) {
             auto segment = vad->pop_segment();
 
@@ -459,16 +498,31 @@ void VoicePipeline::capture_loop()
             float duration = (float)segment.size() / 16000.0f;
             if (duration < 0.5f) {
                 std::cout << "   ⏭️ 语音段太短 (" << duration << "s)，跳过" << std::endl;
+                if (stream_asr_.initialized()) stream_asr_.cancel();
                 continue;
             }
 
             int gen = generation_.fetch_add(1) + 1;
-            std::cout << "\n📝 捕获语音段 #" << gen
-                      << " (" << duration << "s)" << std::endl;
+
+            // 流式 ASR 最终识别（在 capture 线程完成，隐藏 ASR 延迟）
+            std::string stream_text;
+            if (stream_asr_.initialized()) {
+                stream_text = stream_asr_.finalize();
+                std::cout << "\n📝 捕获语音段 #" << gen
+                          << " (" << duration << "s)"
+                          << " → \"" << stream_text << "\"" << std::endl;
+            } else {
+                std::cout << "\n📝 捕获语音段 #" << gen
+                          << " (" << duration << "s)" << std::endl;
+            }
 
             {
                 std::lock_guard<std::mutex> lk(queue_mutex_);
-                segment_queue_.push({std::move(segment), gen});
+                Segment seg;
+                seg.samples    = std::move(segment);
+                seg.text       = stream_text;   // 预识别文本
+                seg.generation = gen;
+                segment_queue_.push(std::move(seg));
             }
             queue_cv_.notify_one();
         }
@@ -509,16 +563,21 @@ void VoicePipeline::process_loop()
             continue;
         }
 
-        // 1) 写入 WAV 文件
-        const std::string wav_file = "temp_interactive_" + std::to_string(my_gen) + ".wav";
-        if (!write_wav_float(wav_file, seg.samples, 16000)) {
-            std::cerr << "   ❌ 写入 WAV 失败" << std::endl;
-            continue;
+        // 1) 获取识别文本：优先使用流式 ASR 预识别结果
+        std::string prompt;
+        if (!seg.text.empty()) {
+            // 流式 ASR 已在 capture 线程完成识别
+            prompt = seg.text;
+        } else {
+            // 传统路径：写入 WAV → 离线 ASR
+            const std::string wav_file = "temp_interactive_" + std::to_string(my_gen) + ".wav";
+            if (!write_wav_float(wav_file, seg.samples, 16000)) {
+                std::cerr << "   ❌ 写入 WAV 失败" << std::endl;
+                continue;
+            }
+            prompt = asr_.transcribe(wav_file);
+            std::remove(wav_file.c_str());
         }
-
-        // 2) ASR
-        std::string prompt = asr_.transcribe(wav_file);
-        std::remove(wav_file.c_str());
 
         if (prompt.empty()) {
             std::cout << "   ⚠️ 未识别到有效语音" << std::endl;

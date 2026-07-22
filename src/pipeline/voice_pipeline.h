@@ -49,6 +49,7 @@
 #include "react_engine.h"
 #include "reflection.h"
 #include "multi_agent.h"
+#include "streaming_asr.h"
 
 class VoicePipeline {
 public:
@@ -95,6 +96,7 @@ private:
     std::shared_ptr<ReActEngine>       react_;    // ReAct 多步推理
     std::shared_ptr<ReflectionEngine>  reflect_;     // 回复反思修正
     std::shared_ptr<MultiAgentEngine> multi_agent_; // 双Agent协作
+    StreamingASR      stream_asr_;    // 流式 ASR (Layer 3.2)
 
     bool initialized_ = false;
 
@@ -117,6 +119,7 @@ private:
     std::condition_variable queue_cv_;
     struct Segment {
         std::vector<float> samples;
+        std::string text;       // 流式 ASR 预识别文本（非空时跳过 process_loop 中的 ASR）
         int generation;
     };
     std::queue<Segment>     segment_queue_;
