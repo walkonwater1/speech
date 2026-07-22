@@ -11,6 +11,8 @@ public:
 
     bool match(const std::string& text) override;
     std::string execute(const std::string& text) override;
+    std::string execute(const std::string& text,
+                        const nlohmann::json& args) override;
     std::string describe() const override {
         return "你可以搜索互联网获取最新信息。";
     }

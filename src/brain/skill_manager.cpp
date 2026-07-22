@@ -69,6 +69,19 @@ std::vector<FunctionDef> SkillManager::collect_function_defs() const
     return defs;
 }
 
+std::string SkillManager::execute_tool(const std::string& name,
+                                         const nlohmann::json& args,
+                                         const std::string& user_text)
+{
+    Skill* skill = find_skill(name);
+    if (!skill || !skill->enabled()) {
+        return "";
+    }
+
+    // 用结构化参数执行，技能可以选择性地使用 args
+    return skill->execute(user_text, args);
+}
+
 Skill* SkillManager::find_skill(const std::string& name)
 {
     for (auto& s : skills_) {

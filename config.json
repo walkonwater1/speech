@@ -39,6 +39,10 @@
     "enabled": true,
     "model": ""
   },
+  "react": {
+    "enabled": true,
+    "max_steps": 5
+  },
   "skills": {
     "weather": { "enabled": true },
     "time": { "enabled": true },

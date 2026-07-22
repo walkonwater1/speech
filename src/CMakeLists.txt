@@ -42,6 +42,7 @@ set(SOURCES
     llm/token_counter.cpp
     llm/embedding_engine.cpp
     llm/function_caller.cpp
+    llm/react_engine.cpp
 
     memory/chat_memory.cpp
     memory/document_chunker.cpp
@@ -74,6 +75,7 @@ set(HEADERS
     llm/token_counter.h
     llm/embedding_engine.h
     llm/function_caller.h
+    llm/react_engine.h
 
     memory/chat_memory.h
     memory/vector_store.h

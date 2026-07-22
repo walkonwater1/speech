@@ -11,6 +11,9 @@ public:
 
     bool match(const std::string& text) override;
     std::string execute(const std::string& text) override;
+    std::string execute(const std::string& text,
+                        const nlohmann::json& args) override;
+
     std::string describe() const override {
         return "你可以查询天气，当用户问到天气相关问题时直接回答，不要说你不能查。";
     }

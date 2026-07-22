@@ -82,6 +82,16 @@ bool VoicePipeline::initialize()
         skill_mgr_.set_function_calling_enabled(false);
     }
 
+    // ── 初始化 ReAct 多步推理 ────────────────────────
+    if (cfg_.react_enabled) {
+        std::cout << "[ReAct] 🧠 启用多步推理 (最多 "
+                  << cfg_.react_max_steps << " 步)" << std::endl;
+        react_ = std::make_shared<ReActEngine>(
+            cfg_.ollama_host, cfg_.llm_model, cfg_.system_prompt);
+    } else {
+        std::cout << "[ReAct] 禁用，使用单步推理" << std::endl;
+    }
+
     std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
@@ -105,7 +115,34 @@ std::string VoicePipeline::process_text(const std::string& text)
 {
     if (!initialized_) return "";
 
-    // 技能检测
+    std::string reply;
+
+    // ── 策略 1: ReAct 多步推理（如果启用）─────────────
+    if (react_) {
+        auto tools = skill_mgr_.collect_function_defs();
+        if (!tools.empty()) {
+            auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
+                return skill_mgr_.execute_tool(name, args, "");
+            };
+
+            std::string ctx = memory_.get_context();
+            auto result = react_->run(text, tools, exec_fn, ctx, cfg_.react_max_steps);
+
+            if (result.success && !result.final_answer.empty()) {
+                reply = result.final_answer;
+                memory_.add(text, reply);
+                speak_and_play(reply);
+                return reply;
+            }
+
+            // ReAct 失败 → 降级
+            if (!result.success) {
+                std::cout << "   [ReAct] 推理失败，降级到单步模式" << std::endl;
+            }
+        }
+    }
+
+    // ── 策略 2: Function Calling + LLM（降级方案）─────
     SkillResult sr = skill_mgr_.detect_and_execute(text);
     std::string extra = SkillManager::get_system_context();
     if (sr.hit) {
@@ -114,7 +151,7 @@ std::string VoicePipeline::process_text(const std::string& text)
     }
 
     std::string context = memory_.get_context();
-    std::string reply = llm_.chat(text, context, extra);
+    reply = llm_.chat(text, context, extra);
 
     if (reply.empty()) return "";
 
@@ -161,7 +198,29 @@ std::string VoicePipeline::process_voice()
 
     std::remove(wav_file.c_str());
 
-    // 技能检测
+    std::string reply;
+
+    // ── ReAct 多步推理（优先）─────────────────────────
+    if (react_) {
+        auto tools = skill_mgr_.collect_function_defs();
+        if (!tools.empty()) {
+            auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
+                return skill_mgr_.execute_tool(name, args, "");
+            };
+
+            std::string ctx = memory_.get_context();
+            auto result = react_->run(prompt, tools, exec_fn, ctx, cfg_.react_max_steps);
+
+            if (result.success && !result.final_answer.empty()) {
+                reply = result.final_answer;
+                memory_.add(prompt, reply);
+                speak_and_play(reply);
+                return reply;
+            }
+        }
+    }
+
+    // ── 降级：Function Calling → 关键字匹配 ─────────
     SkillResult sr = skill_mgr_.detect_and_execute(prompt);
     std::string extra = SkillManager::get_system_context();
     if (sr.hit) {
@@ -170,7 +229,7 @@ std::string VoicePipeline::process_voice()
     }
 
     std::string context = memory_.get_context();
-    std::string reply = llm_.chat(prompt, context, extra);
+    reply = llm_.chat(prompt, context, extra);
     if (reply.empty()) return "";
 
     memory_.add(prompt, reply);
@@ -434,23 +493,38 @@ void VoicePipeline::process_loop()
             continue;
         }
 
-        // 4) 技能检测
-        SkillResult sr = skill_mgr_.detect_and_execute(prompt);
-        std::string extra = SkillManager::get_system_context();
-        if (sr.hit) {
-            extra += "\n" + sr.result_text;
-            std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+        // 4) 推理（ReAct → Function Calling → 关键字匹配）
+        std::string context = memory_.get_context();
+        std::string reply;
+
+        if (react_) {
+            auto tools = skill_mgr_.collect_function_defs();
+            if (!tools.empty()) {
+                auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
+                    return skill_mgr_.execute_tool(name, args, "");
+                };
+                auto result = react_->run(prompt, tools, exec_fn, context, cfg_.react_max_steps);
+                if (result.success && !result.final_answer.empty()) {
+                    reply = result.final_answer;
+                }
+            }
         }
 
-        // 5) LLM
-        std::string context = memory_.get_context();
-        std::string reply = llm_.chat(prompt, context, extra);
+        if (reply.empty()) {
+            SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+            std::string extra = SkillManager::get_system_context();
+            if (sr.hit) {
+                extra += "\n" + sr.result_text;
+                std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+            }
+            reply = llm_.chat(prompt, context, extra);
+        }
 
         if (reply.empty()) continue;
 
-        // 再次检查是否过期（LLM 可能耗时较长）
+        // 再次检查是否过期（ReAct/LLM 可能耗时较长）
         if (my_gen < generation_.load()) {
-            std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 LLM 后过期，丢弃回复" << std::endl;
+            std::cout << "   ⏭️ 语音段 #" << my_gen << " 在推理后过期，丢弃回复" << std::endl;
             continue;
         }
 

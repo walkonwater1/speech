@@ -23,8 +23,22 @@ bool WebSearchSkill::match(const std::string& text)
 
 std::string WebSearchSkill::execute(const std::string& text)
 {
-    // 提取搜索关键词（去除指令词）
-    std::string query = text;
+    return execute(text, nlohmann::json::object());
+}
+
+std::string WebSearchSkill::execute(const std::string& text,
+                                     const nlohmann::json& args)
+{
+    // 优先使用 LLM 提取的结构化参数
+    std::string query;
+    if (args.contains("query") && args["query"].is_string()) {
+        query = args["query"].get<std::string>();
+    }
+
+    // 如果没有提取到关键词，回退到从文本中提取
+    if (query.empty()) {
+        query = text;
+    }
     static const std::vector<std::string> prefixes = {
         "搜索", "搜一下", "帮我查", "帮我搜", "上网查", "查一下", "帮我找", "查找"
     };

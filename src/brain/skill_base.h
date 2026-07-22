@@ -52,6 +52,17 @@ public:
     /// @return 技能结果文本
     virtual std::string execute(const std::string& text) = 0;
 
+    /// 执行技能（带结构化参数，供 ReAct 使用）
+    /// @param text 用户原文（降级时用）
+    /// @param args LLM 提取的结构化参数 (JSON)，如 {"city":"北京"}
+    /// @return 技能结果文本
+    /// 默认实现忽略 args，直接调用 execute(text)
+    virtual std::string execute(const std::string& text,
+                                const nlohmann::json& args) {
+        (void)args;
+        return execute(text);
+    }
+
     /// 该技能的能力描述（会注入 system prompt，让 LLM 知道它的存在）
     virtual std::string describe() const { return ""; }
 

@@ -22,7 +22,20 @@ bool WeatherSkill::match(const std::string& text)
 
 std::string WeatherSkill::execute(const std::string& text)
 {
-    std::string city = extract_city(text);
+    return execute(text, nlohmann::json::object());
+}
+
+std::string WeatherSkill::execute(const std::string& text,
+                                   const nlohmann::json& args)
+{
+    std::string city;
+    // 优先使用 LLM 提取的结构化参数
+    if (args.contains("city") && args["city"].is_string()) {
+        city = extract_city(args["city"].get<std::string>());
+    } else {
+        city = extract_city(text);
+    }
+
     std::string url = "https://wttr.in/" + city + "?format=%C+%t+%h+%w&lang=zh";
 
     std::cout << "   [Skill:天气] 查询 " << city << " ..." << std::endl;

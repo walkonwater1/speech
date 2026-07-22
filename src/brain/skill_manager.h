@@ -67,13 +67,22 @@ public:
     /// 获取系统信息上下文（时间等总是有用的信息）
     static std::string get_system_context();
 
+    /// 收集所有已启用技能的函数定义（供 FunctionCaller / ReAct 使用）
+    std::vector<FunctionDef> collect_function_defs() const;
+
+    /// 按名称 + 结构化参数执行技能（供 ReAct 回调使用）
+    /// @param name      工具名
+    /// @param args      LLM 提取的参数
+    /// @param user_text 用户原文（降级时用）
+    /// @return 工具执行结果，空字符串表示执行失败
+    std::string execute_tool(const std::string& name,
+                             const nlohmann::json& args,
+                             const std::string& user_text);
+
 private:
     std::vector<std::unique_ptr<Skill>> skills_;
     std::shared_ptr<FunctionCaller> function_caller_;  // LLM 工具选择器
     bool fc_enabled_ = true;                           // function calling 开关
-
-    /// 收集所有已启用技能的函数定义
-    std::vector<FunctionDef> collect_function_defs() const;
 
     /// 按名称查找技能
     Skill* find_skill(const std::string& name);

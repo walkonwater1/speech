@@ -61,6 +61,10 @@ struct PipelineConfig {
     bool fc_enabled     = true;            // 启用 function calling
     std::string fc_model = "";             // 工具选择模型（空=复用 llm_model）
 
+    // ── ReAct (多步推理) ──────────────────────────────
+    bool react_enabled  = true;            // 启用 ReAct 多步推理
+    int  react_max_steps = 5;              // 最大推理步数
+
     // ── 文件加载 ───────────────────────────────────
 
     /// 从 JSON 文件加载配置（未出现在文件中的键保持默认值）

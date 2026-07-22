@@ -113,6 +113,13 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(fc, "model",   fc_model);
     }
 
+    // ── ReAct ────────────────────────────────────────
+    if (j.contains("react")) {
+        auto& r = j["react"];
+        try_get(r, "enabled",    react_enabled);
+        try_get(r, "max_steps",  react_max_steps);
+    }
+
     // ── 技能 ────────────────────────────────────────
     if (j.contains("skills")) {
         auto& s = j["skills"];
