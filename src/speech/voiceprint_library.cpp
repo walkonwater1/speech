@@ -20,6 +20,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <ctime>
+#include "logger.h"
 
 using json = nlohmann::json;
 
@@ -87,21 +88,21 @@ bool VoiceprintLibrary::initialize(const std::string& library_dir,
     // 2. 创建 embedding manager
     manager_ = SherpaOnnxCreateSpeakerEmbeddingManager(dim);
     if (!manager_) {
-        std::cerr << "   ❌ 创建 embedding manager 失败" << std::endl;
+        LOG_ERROR("   ❌ 创建 embedding manager 失败");
         return false;
     }
 
     std::cout << "   ✅ 模型就绪 (dim=" << dim
               << ", 阈值=" << threshold_ << ")" << std::endl;
 #else
-    std::cerr << "   ⚠️ sherpa-onnx 未安装" << std::endl;
+    LOG_WARN("   ⚠️ sherpa-onnx 未安装");
     initialized_ = true;
     return true;
 #endif
 
     // 3. 加载已注册用户
     if (!load_library()) {
-        std::cerr << "   ⚠️ 加载声纹库失败，将从空库开始" << std::endl;
+        LOG_WARN("   ⚠️ 加载声纹库失败，将从空库开始");
     }
 
     initialized_ = true;
@@ -127,7 +128,7 @@ bool VoiceprintLibrary::enroll(const std::string& wav_path,
     if (!display_name.empty()) {
         std::cout << " (" << display_name << ")";
     }
-    std::cout << std::endl;
+    LOG_INFO("std::endl");
 
     // 创建用户目录
     std::string user_dir = library_dir_ + "/" + name;
@@ -136,7 +137,7 @@ bool VoiceprintLibrary::enroll(const std::string& wav_path,
     // 保存注册音频
     std::string saved_wav = enroll_path(name);
     if (!copy_file(wav_path, saved_wav)) {
-        std::cerr << "   ❌ 保存注册音频失败" << std::endl;
+        LOG_ERROR("   ❌ 保存注册音频失败");
         return false;
     }
 
@@ -144,7 +145,7 @@ bool VoiceprintLibrary::enroll(const std::string& wav_path,
     // 计算声纹嵌入
     std::vector<float> embedding;
     if (!compute_embedding(wav_path, embedding)) {
-        std::cerr << "   ❌ 无法计算声纹嵌入" << std::endl;
+        LOG_ERROR("   ❌ 无法计算声纹嵌入");
         return false;
     }
 
@@ -155,7 +156,7 @@ bool VoiceprintLibrary::enroll(const std::string& wav_path,
     int32_t ret = SherpaOnnxSpeakerEmbeddingManagerAdd(
         manager_, name.c_str(), embedding.data());
     if (ret != 1) {
-        std::cerr << "   ❌ 注册到 embedding manager 失败" << std::endl;
+        LOG_ERROR("   ❌ 注册到 embedding manager 失败");
         return false;
     }
 #endif
@@ -188,7 +189,7 @@ bool VoiceprintLibrary::enroll(const std::string& wav_path,
     save_library();
 
     emit("enrolled", name);
-    std::cout << "   ✅ 注册成功" << std::endl;
+    LOG_INFO("   ✅ 注册成功");
     return true;
 }
 
@@ -199,7 +200,7 @@ IdentificationResult VoiceprintLibrary::identify(const std::string& wav_path)
     IdentificationResult result;
 
     if (!has_any()) {
-        std::cout << "   [Voiceprint] ⚠️ 声纹库为空，无法识别" << std::endl;
+        LOG_INFO("   [Voiceprint] ⚠️ 声纹库为空，无法识别");
         return result;
     }
 
@@ -208,7 +209,7 @@ IdentificationResult VoiceprintLibrary::identify(const std::string& wav_path)
 
     std::vector<float> embedding;
     if (!compute_embedding(wav_path, embedding)) {
-        std::cerr << "   [Voiceprint] 无法计算嵌入向量" << std::endl;
+        LOG_ERROR("   [Voiceprint] 无法计算嵌入向量");
         return result;
     }
 
@@ -245,7 +246,7 @@ IdentificationResult VoiceprintLibrary::identify(const std::string& wav_path)
         std::cout << "   [Voiceprint] 🎯 识别: " << result.name
                   << " (置信度=" << result.confidence << ")" << std::endl;
     } else {
-        std::cout << "   [Voiceprint] ❓ 未识别（可能说话人未注册）" << std::endl;
+        LOG_INFO("   [Voiceprint] ❓ 未识别（可能说话人未注册）");
     }
 
     return result;
@@ -419,7 +420,7 @@ bool VoiceprintLibrary::compute_embedding(const std::string& wav_path,
     SherpaOnnxOnlineStreamInputFinished(stream);
 
     if (!SherpaOnnxSpeakerEmbeddingExtractorIsReady(extractor_, stream)) {
-        std::cerr << "   [Voiceprint] 音频不足，无法计算嵌入" << std::endl;
+        LOG_ERROR("   [Voiceprint] 音频不足，无法计算嵌入");
         SherpaOnnxDestroyOnlineStream(stream);
         SherpaOnnxFreeWave(wave);
         return false;
@@ -453,7 +454,7 @@ bool VoiceprintLibrary::load_library()
     std::string index_path = library_dir_ + "/library.json";
     std::ifstream f(index_path);
     if (!f.is_open()) {
-        std::cout << "   [Voiceprint] 未找到 library.json，创建新库" << std::endl;
+        LOG_INFO("   [Voiceprint] 未找到 library.json，创建新库");
         return save_library();
     }
 
@@ -543,7 +544,7 @@ bool VoiceprintLibrary::save_library() const
     std::string index_path = library_dir_ + "/library.json";
     std::ofstream f(index_path);
     if (!f.is_open()) {
-        std::cerr << "   ⚠️ 无法写入 library.json" << std::endl;
+        LOG_WARN("   ⚠️ 无法写入 library.json");
         return false;
     }
 

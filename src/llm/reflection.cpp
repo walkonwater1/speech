@@ -20,6 +20,7 @@
 
 #include <iostream>
 #include <sstream>
+#include "logger.h"
 
 using json = nlohmann::json;
 
@@ -111,7 +112,7 @@ ReflectionResult ReflectionEngine::reflect(
                       << "\"" << std::endl;
         } else {
             result.improved = original_reply;
-            std::cout << "   [Reflect] ✅ 审查通过，无需修正" << std::endl;
+            LOG_INFO("   [Reflect] ✅ 审查通过，无需修正");
         }
 
     } catch (const std::exception& e) {

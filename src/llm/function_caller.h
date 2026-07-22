@@ -48,12 +48,6 @@ public:
     ToolDecision decide(const std::string& user_message,
                         const std::vector<FunctionDef>& tools);
 
-    /// 设置超时时间（秒）
-    void set_timeout(long sec) { timeout_sec_ = sec; }
-
-    /// 切换用于工具选择的模型
-    void set_model(const std::string& model) { model_ = model; }
-
 private:
     std::string host_;
     std::string model_;

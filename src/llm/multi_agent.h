@@ -79,8 +79,6 @@ public:
                                  const std::string& critic_model,
                                  int max_rounds = 2);
 
-    void set_timeout(long sec) { timeout_sec_ = sec; }
-
 private:
     std::string host_;
     long timeout_sec_ = 60;

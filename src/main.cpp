@@ -18,13 +18,17 @@
  */
 
 #include "voice_pipeline.h"
+#include "utils/config_watcher.h"
+#include "logger.h"
 
 #include <iostream>
 #include <string>
 #include <csignal>
+#include <memory>
 
 // 全局指针，用于 Ctrl+C 信号处理
 static VoicePipeline* g_pipeline = nullptr;
+static std::string    g_cli_config_path;
 
 static void signal_handler(int /*sig*/)
 {
@@ -32,6 +36,22 @@ static void signal_handler(int /*sig*/)
     if (g_pipeline) {
         g_pipeline->stop_interactive();
     }
+}
+
+/// SIGHUP: 热重载配置 (Layer 4.4)
+static void reload_handler(int /*sig*/)
+{
+    LOG_INFO("[SIGHUP] 📝 收到 SIGHUP，重新加载配置...");
+    if (g_cli_config_path.empty() || !g_pipeline) {
+        LOG_WARN("[SIGHUP] 无配置文件路径或 pipeline 未就绪");
+        return;
+    }
+    PipelineConfig new_cfg;
+    if (!new_cfg.load_from_file(g_cli_config_path)) {
+        LOG_ERROR("[SIGHUP] ❌ 配置文件加载失败: {}", g_cli_config_path);
+        return;
+    }
+    g_pipeline->reload_config(new_cfg);
 }
 
 static void print_menu()
@@ -49,6 +69,9 @@ static void print_menu()
 
 int main(int /*argc*/, char** /*argv*/)
 {
+    // ── 日志系统 ────────────────────────────────────────
+    voice::init_logger("voice_pipeline.log");
+
     // ── 配置 ──────────────────────────────────────────
     PipelineConfig cfg;
 
@@ -67,10 +90,27 @@ int main(int /*argc*/, char** /*argv*/)
         return 1;
     }
 
+    pipeline.set_config_path(config_path);
+    g_cli_config_path = config_path;
     g_pipeline = &pipeline;
 
     // Ctrl+C 处理
     signal(SIGINT, signal_handler);
+    signal(SIGHUP, reload_handler);  // Layer 4.4: 热重载
+
+    // ── 启动配置文件监听 (Layer 4.4) ──────────────────
+    std::unique_ptr<ConfigWatcher> watcher;
+    if (!config_path.empty()) {
+        watcher = std::make_unique<ConfigWatcher>(config_path, [&pipeline, &config_path]() {
+            PipelineConfig new_cfg;
+            if (new_cfg.load_from_file(config_path)) {
+                pipeline.reload_config(new_cfg);
+            } else {
+                LOG_ERROR("[ConfigWatcher] ❌ 配置文件加载失败: {}", config_path);
+            }
+        });
+        watcher->start();
+    }
 
     print_menu();
 
@@ -117,6 +157,7 @@ int main(int /*argc*/, char** /*argv*/)
         }
     }
 
+    if (watcher) watcher->stop();
     g_pipeline = nullptr;
     return 0;
 }

@@ -14,6 +14,7 @@
 #include "wake_word.h"
 
 #include <iostream>
+#include "logger.h"
 
 // ════════════════════════════════════════════════════════════════
 // 汉字 → 拼音查找表（覆盖 ~400 个常用汉字）
@@ -142,7 +143,7 @@ bool WakeWordDetector::detect(const std::string& asr_text)
         std::cout << "   [KWS] 未检测到唤醒词 \"" << wake_word_
                   << "\" (识别: " << pinyin_text << ")" << std::endl;
     } else {
-        std::cout << "   [KWS] ✅ 唤醒词检测成功" << std::endl;
+        LOG_INFO("   [KWS] ✅ 唤醒词检测成功");
     }
 
     return matched;

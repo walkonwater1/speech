@@ -21,6 +21,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "logger.h"
 
 // ── AudioRecorder ────────────────────────────────────
 
@@ -49,11 +50,11 @@ bool AudioRecorder::record(const std::string& output_path)
     }
 
     if (pid < 0) {
-        std::cerr << "   ❌ fork 失败" << std::endl;
+        LOG_ERROR("   ❌ fork 失败");
         return false;
     }
 
-    std::cout << "   🎙️  录音中... 再次按下 Enter 结束" << std::endl;
+    LOG_INFO("   🎙️  录音中... 再次按下 Enter 结束");
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     // 停止录音
@@ -136,7 +137,7 @@ pid_t AudioPlayer::play_async(const std::string& file_path)
         _exit(1);
     }
     if (pid < 0) {
-        std::cerr << "   ❌ fork 播放进程失败" << std::endl;
+        LOG_ERROR("   ❌ fork 播放进程失败");
     }
     return pid;
 }

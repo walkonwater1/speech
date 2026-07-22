@@ -1,3 +1,4 @@
+#include "logger.h"
 /**
  * 大语言模型推理 — Ollama HTTP API
  *

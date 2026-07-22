@@ -10,6 +10,7 @@ find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(websocketpp QUIET)  # header-only, optional
+find_package(spdlog REQUIRED)
 
 # espeak-ng (libespeak-ng.so.1 已安装，手动指定路径)
 set(ESPEAK_LIB "/usr/lib/x86_64-linux-gnu/libespeak-ng.so.1")
@@ -20,6 +21,14 @@ find_library(SHERPA_ONNX_LIB sherpa-onnx-c-api PATHS "${SHERPA_ONNX_DIR}/lib")
 find_path(SHERPA_ONNX_INCLUDE sherpa-onnx/c-api/c-api.h PATHS "${SHERPA_ONNX_DIR}/include")
 if(SHERPA_ONNX_LIB AND SHERPA_ONNX_INCLUDE)
     add_compile_definitions(SHERPA_ONNX_AVAILABLE)
+endif()
+
+# onnxruntime (sherpa-onnx bundled)
+set(ONNXRUNTIME_DIR "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
+set(ONNXRUNTIME_LIB "${SHERPA_ONNX_DIR}/lib/libonnxruntime.so")
+find_path(ONNXRUNTIME_INCLUDE onnxruntime_c_api.h PATHS "${ONNXRUNTIME_DIR}/include")
+if(ONNXRUNTIME_INCLUDE AND EXISTS "${ONNXRUNTIME_LIB}")
+    add_compile_definitions(ONNX_EMBEDDING_AVAILABLE)
 endif()
 
 # ── 源文件（按功能模块组织）────────────────────────────
@@ -45,6 +54,7 @@ set(SOURCES
     llm/prompt_builder.cpp
     llm/token_counter.cpp
     llm/embedding_engine.cpp
+    llm/onnx_embedding.cpp
     llm/function_caller.cpp
     llm/react_engine.cpp
     llm/reflection.cpp
@@ -55,6 +65,8 @@ set(SOURCES
 
     audio/audio_io.cpp
     audio/vad.cpp
+
+    utils/config_watcher.cpp
 )
 
 set(HEADERS
@@ -82,6 +94,7 @@ set(HEADERS
     llm/prompt_builder.h
     llm/token_counter.h
     llm/embedding_engine.h
+    llm/onnx_embedding.h
     llm/function_caller.h
     llm/react_engine.h
     llm/reflection.h
@@ -93,6 +106,7 @@ set(HEADERS
 
     audio/audio_io.h
     audio/vad.h
+    utils/logger.h
     speech/prosody.h
     speech/voice_emotion.h
     audio/denoiser.h
@@ -118,15 +132,23 @@ target_include_directories(ws_voice_server PRIVATE
     ${CMAKE_SOURCE_DIR}/server
     ${CMAKE_SOURCE_DIR}/utils
     ${CURL_INCLUDE_DIRS}
-    ${Boost_INCLUDE_DIRS}
+${Boost_INCLUDE_DIRS}
 )
+if(ONNXRUNTIME_INCLUDE)
+    target_include_directories(ws_voice_server PRIVATE ${ONNXRUNTIME_INCLUDE})
+    target_compile_definitions(ws_voice_server PRIVATE ONNX_EMBEDDING_AVAILABLE)
+endif()
 target_link_libraries(ws_voice_server PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
     ${ESPEAK_LIB}
     pthread
     Boost::system
+    spdlog::spdlog
 )
+if(EXISTS "${ONNXRUNTIME_LIB}")
+    target_link_libraries(ws_voice_server PRIVATE ${ONNXRUNTIME_LIB})
+endif()
 if(SHERPA_ONNX_LIB)
     target_include_directories(ws_voice_server PRIVATE ${SHERPA_ONNX_INCLUDE})
     target_link_libraries(ws_voice_server PRIVATE ${SHERPA_ONNX_LIB})
@@ -146,11 +168,13 @@ add_executable(test_streaming test_streaming_asr.cpp
 target_include_directories(test_streaming PRIVATE
     ${CMAKE_SOURCE_DIR}/speech
     ${CMAKE_SOURCE_DIR}/llm
+    ${CMAKE_SOURCE_DIR}/utils
     ${CURL_INCLUDE_DIRS})
 target_link_libraries(test_streaming PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
-    pthread)
+    pthread
+    spdlog::spdlog)
 if(SHERPA_ONNX_LIB)
     target_include_directories(test_streaming PRIVATE ${SHERPA_ONNX_INCLUDE})
     target_link_libraries(test_streaming PRIVATE ${SHERPA_ONNX_LIB})
@@ -166,15 +190,23 @@ target_include_directories(voice_pipeline PRIVATE
     ${CMAKE_SOURCE_DIR}/memory
     ${CMAKE_SOURCE_DIR}/audio
     ${CMAKE_SOURCE_DIR}/utils
-    ${CURL_INCLUDE_DIRS}
+${CURL_INCLUDE_DIRS}
 )
+if(ONNXRUNTIME_INCLUDE)
+    target_include_directories(voice_pipeline PRIVATE ${ONNXRUNTIME_INCLUDE})
+    target_compile_definitions(voice_pipeline PRIVATE ONNX_EMBEDDING_AVAILABLE)
+endif()
 
 target_link_libraries(voice_pipeline PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
     ${ESPEAK_LIB}
     pthread
+    spdlog::spdlog
 )
+if(EXISTS "${ONNXRUNTIME_LIB}")
+    target_link_libraries(voice_pipeline PRIVATE ${ONNXRUNTIME_LIB})
+endif()
 
 # 如果有 sherpa-onnx
 if(SHERPA_ONNX_LIB)

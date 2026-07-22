@@ -23,6 +23,7 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include "logger.h"
 
 using json = nlohmann::json;
 
@@ -158,7 +159,7 @@ ReActResult ReActEngine::run(
                 ? llm_content
                 : parsed.thought;
             result.total_steps = step + 1;
-            std::cout << "   [ReAct] ⚠️ 无 action/final，当作闲聊回复" << std::endl;
+            LOG_INFO("   [ReAct] ⚠️ 无 action/final，当作闲聊回复");
             return result;
         }
 

@@ -20,6 +20,11 @@ public:
     /// 获取 PromptBuilder（用于注入动态变量，如当前时间）
     PromptBuilder& builder() { return builder_; }
 
+    /// 运行时更新 system prompt（支持热配置重载 Layer 4.4）
+    void set_system_prompt(const std::string& prompt) {
+        builder_.set_system(prompt);
+    }
+
     /// 发消息给 LLM，获取回复
     /// @param user_message     当前用户消息
     /// @param history_context  历史对话上下文（可选）

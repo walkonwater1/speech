@@ -1,3 +1,4 @@
+#include "logger.h"
 /**
  * Function Calling — LLM 驱动的工具选择（实现）
  *

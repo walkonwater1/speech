@@ -15,12 +15,17 @@
 #include "pipeline/config.h"
 #include "pipeline/voice_pipeline.h"
 #include "server/ws_server.h"
+#include "utils/config_watcher.h"
+#include "logger.h"
 
 #include <iostream>
 #include <csignal>
 #include <cstdlib>
+#include <memory>
 
 static WsVoiceServer* g_server = nullptr;
+static VoicePipeline* g_pipeline = nullptr;
+static std::string   g_config_path;
 
 // ── 信号处理 ──────────────────────────────────────────
 
@@ -32,8 +37,27 @@ static void signal_handler(int sig)
     }
 }
 
+/// SIGHUP: 热重载配置 (Layer 4.4)
+static void reload_handler(int /*sig*/)
+{
+    LOG_INFO("[SIGHUP] 📝 收到 SIGHUP，重新加载配置...");
+    if (g_config_path.empty() || !g_pipeline) {
+        LOG_WARN("[SIGHUP] 无配置文件路径或 pipeline 未就绪");
+        return;
+    }
+
+    PipelineConfig new_cfg;
+    if (!new_cfg.load_from_file(g_config_path)) {
+        LOG_ERROR("[SIGHUP] ❌ 配置文件加载失败: {}", g_config_path);
+        return;
+    }
+
+    g_pipeline->reload_config(new_cfg);
+}
+
 int main(int argc, char* argv[])
 {
+    voice::init_logger("ws_voice_server.log");
     // ── 1. 加载配置 ──────────────────────────────────
     PipelineConfig cfg;
 
@@ -75,6 +99,11 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // 记住配置文件路径（供 SIGHUP 和 ConfigWatcher 使用）
+    pipeline.set_config_path(config_path);
+    g_config_path = config_path;
+    g_pipeline = &pipeline;
+
     std::cout << std::endl;
 
     // ── 3. 启动 WebSocket 服务 ────────────────────────
@@ -84,9 +113,27 @@ int main(int argc, char* argv[])
     g_server = &server;
     signal(SIGINT,  signal_handler);
     signal(SIGTERM, signal_handler);
+    signal(SIGHUP,  reload_handler);  // Layer 4.4: 热重载
+
+    // ── 4. 启动配置文件监听 (Layer 4.4) ───────────────
+    std::unique_ptr<ConfigWatcher> watcher;
+    if (!config_path.empty()) {
+        watcher = std::make_unique<ConfigWatcher>(config_path, [&pipeline, &config_path]() {
+            PipelineConfig new_cfg;
+            if (new_cfg.load_from_file(config_path)) {
+                pipeline.reload_config(new_cfg);
+            } else {
+                LOG_ERROR("[ConfigWatcher] ❌ 配置文件加载失败: {}", config_path);
+            }
+        });
+        watcher->start();
+    }
 
     // 阻塞直到被信号中断
     server.run();
+
+    // 清理
+    if (watcher) watcher->stop();
 
     std::cout << "👋 服务已退出" << std::endl;
     return 0;

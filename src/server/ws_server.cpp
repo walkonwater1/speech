@@ -17,10 +17,10 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <cstring>
 #include <cstdio>
 #include <thread>
 #include <chrono>
+#include "logger.h"
 
 using json = nlohmann::json;
 
@@ -76,7 +76,7 @@ void WsVoiceServer::set_pipeline(VoicePipeline* pipeline)
 void WsVoiceServer::run()
 {
     if (!pipeline_) {
-        std::cerr << "❌ [WS] VoicePipeline 未设置" << std::endl;
+        LOG_ERROR("❌ [WS] VoicePipeline 未设置");
         return;
     }
 
@@ -130,14 +130,14 @@ void WsVoiceServer::run()
         srv.listen(cfg_.port);
         srv.start_accept();
 
-        std::cout << std::endl;
-        std::cout << "========================================================" << std::endl;
-        std::cout << "  🌐 WebSocket 语音服务已启动" << std::endl;
+        LOG_INFO("std::endl");
+        LOG_INFO("========================================================");
+        LOG_INFO("  🌐 WebSocket 语音服务已启动");
         std::cout << "  ws://0.0.0.0:" << cfg_.port << std::endl;
-        std::cout << "  协议: JSON (type + content)" << std::endl;
-        std::cout << "  示例: {\"type\":\"text\",\"content\":\"你好\"}" << std::endl;
-        std::cout << "========================================================" << std::endl;
-        std::cout << std::endl;
+        LOG_INFO("  协议: JSON (type + content)");
+        LOG_INFO("  示例: {\"type\":\"text\",\"content\":\"你好\"}");
+        LOG_INFO("========================================================");
+        LOG_INFO("std::endl");
 
         running_ = true;
 
@@ -156,7 +156,7 @@ void WsVoiceServer::stop()
 {
     if (!running_) return;
 
-    std::cout << "\n⏹️  [WS] 正在停止服务..." << std::endl;
+    LOG_INFO("\n⏹️  [WS] 正在停止服务...");
 
     try {
         impl_->server.stop_listening();
@@ -169,7 +169,7 @@ void WsVoiceServer::stop()
     } catch (...) {}
 
     running_ = false;
-    std::cout << "   [WS] 服务已停止" << std::endl;
+    LOG_INFO("   [WS] 服务已停止");
 }
 
 // ── 消息路由 ──────────────────────────────────────────

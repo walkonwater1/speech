@@ -45,6 +45,11 @@ VADState EnergyVAD::process_frame(const float* samples, int n)
 
     switch (state_) {
     case VADState::SILENCE:
+        // 冷却期：语音段刚结束，强制静音 N 帧防止回声误触发
+        if (cooldown_remaining_ > 0) {
+            cooldown_remaining_--;
+            return VADState::SILENCE;
+        }
         if (d.is_speech) {
             speech_frames_ = 1;
             silence_frames_ = 0;
@@ -111,6 +116,7 @@ std::vector<float> EnergyVAD::pop_segment()
     speech_buffer_.clear();
     speech_frames_ = 0;
     silence_frames_ = 0;
+    cooldown_remaining_ = cfg_.silence_cooldown_frames;  // 启动冷却
     state_ = VADState::SILENCE;
     return result;
 }
@@ -131,6 +137,7 @@ void EnergyVAD::reset()
     state_ = VADState::SILENCE;
     speech_frames_ = 0;
     silence_frames_ = 0;
+    cooldown_remaining_ = 0;
     segment_ready_ = false;
     speech_buffer_.clear();
     pre_buffer_pos_ = 0;
@@ -161,7 +168,7 @@ EnergyVAD::FrameDecision AdaptiveVAD::decide_frame(const float* samples, int n)
     }
 
     float threshold = noise_floor_initialized_
-        ? noise_floor_ * cfg_.adaptive_factor
+        ? std::max(noise_floor_ * cfg_.adaptive_factor, cfg_.min_energy_threshold)
         : cfg_.energy_threshold;
 
     return {rms > threshold, rms};

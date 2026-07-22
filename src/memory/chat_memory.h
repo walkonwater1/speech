@@ -29,6 +29,9 @@ public:
     /// 清空
     void clear();
 
+    /// 运行时更新记忆限制（支持热配置重载 Layer 4.4）
+    void set_limits(int max_rounds, int max_tokens);
+
     // ── Token 统计（可观测性）───────────────────────
 
     /// 当前估算 token 数

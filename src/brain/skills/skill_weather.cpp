@@ -1,3 +1,4 @@
+#include "logger.h"
 /**
  * 天气查询技能 — 实现
  *

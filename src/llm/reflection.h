@@ -60,9 +60,6 @@ public:
                              const std::string& tool_context = "",
                              const std::string& personality = "");
 
-    /// 设置超时（秒）
-    void set_timeout(long sec) { timeout_sec_ = sec; }
-
 private:
     std::string host_;
     std::string model_;

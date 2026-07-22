@@ -16,16 +16,18 @@
 
 #include "voice_pipeline.h"
 #include "denoiser.h"
+#include "wav_utils.h"
 
 #include <iostream>
 #include <cstdio>
-#include <cstring>
 #include <cstdint>
-#include <cstdlib>
+#include <cmath>
+#include <cctype>
 #include <fstream>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "logger.h"
 
 // ── 构造 / 初始化 ────────────────────────────────────
 
@@ -47,14 +49,14 @@ VoicePipeline::VoicePipeline(const PipelineConfig& cfg)
 
 bool VoicePipeline::initialize()
 {
-    std::cout << "============ 初始化管线 ============" << std::endl;
+    LOG_INFO("============ 初始化管线 ============");
 
     if (!asr_.initialize()) {
-        std::cerr << "❌ ASR 初始化失败" << std::endl;
+        LOG_ERROR("❌ ASR 初始化失败");
     }
 
     if (!speaker_.initialize()) {
-        std::cerr << "❌ 声纹模型初始化失败" << std::endl;
+        LOG_ERROR("❌ 声纹模型初始化失败");
     }
 
     // ── 初始化多用户声纹库 (Layer 3.4) ──────────────────
@@ -72,14 +74,23 @@ bool VoicePipeline::initialize()
     }
 
     if (!tts_.initialize()) {
-        std::cerr << "❌ TTS 初始化失败" << std::endl;
+        LOG_ERROR("❌ TTS 初始化失败");
         return false;
     }
 
     // ── 初始化 EmbeddingEngine + RAG ──────────────────
     if (cfg_.skill_rag) {
-        std::cout << "[Embedding] 初始化 (Ollama /api/embed) ..." << std::endl;
-        embed_ = std::make_shared<EmbeddingEngine>(cfg_.ollama_host, cfg_.llm_model);
+        if (cfg_.embedding_backend == "onnx") {
+            LOG_INFO("[Embedding] 初始化 (本地 ONNX) ...");
+            embed_ = EmbeddingEngine::create_onnx(cfg_.embedding_model_dir);
+            if (!embed_) {
+                LOG_WARN("⚠️ ONNX 嵌入初始化失败，降级使用 Ollama");
+                embed_ = std::make_shared<EmbeddingEngine>(cfg_.ollama_host, cfg_.llm_model);
+            }
+        } else {
+            LOG_INFO("[Embedding] 初始化 (Ollama /api/embed) ...");
+            embed_ = std::make_shared<EmbeddingEngine>(cfg_.ollama_host, cfg_.llm_model);
+        }
         skill_mgr_.register_rag(embed_, cfg_.rag_docs_dir);
         skill_mgr_.set_enabled("rag", true);
     }
@@ -92,7 +103,7 @@ bool VoicePipeline::initialize()
         fc_ = std::make_shared<FunctionCaller>(cfg_.ollama_host, fc_model);
         skill_mgr_.set_function_caller(fc_);
     } else {
-        std::cout << "[FunctionCalling] 禁用，使用关键字匹配降级方案" << std::endl;
+        LOG_INFO("[FunctionCalling] 禁用，使用关键字匹配降级方案");
         skill_mgr_.set_function_calling_enabled(false);
     }
 
@@ -103,7 +114,7 @@ bool VoicePipeline::initialize()
         react_ = std::make_shared<ReActEngine>(
             cfg_.ollama_host, cfg_.llm_model, cfg_.system_prompt);
     } else {
-        std::cout << "[ReAct] 禁用，使用单步推理" << std::endl;
+        LOG_INFO("[ReAct] 禁用，使用单步推理");
     }
 
     // ── 初始化 Reflection 反思 ────────────────────────
@@ -114,7 +125,7 @@ bool VoicePipeline::initialize()
                   << rmodel << ")" << std::endl;
         reflect_ = std::make_shared<ReflectionEngine>(cfg_.ollama_host, rmodel);
     } else {
-        std::cout << "[Reflect] 禁用" << std::endl;
+        LOG_INFO("[Reflect] 禁用");
     }
 
     // ── 初始化 Multi-Agent ───────────────────────────
@@ -125,7 +136,7 @@ bool VoicePipeline::initialize()
                   << cmodel << ", 最多" << cfg_.ma_max_rounds << "轮)" << std::endl;
         multi_agent_ = std::make_shared<MultiAgentEngine>(cfg_.ollama_host);
     } else {
-        std::cout << "[MultiAgent] 禁用" << std::endl;
+        LOG_INFO("[MultiAgent] 禁用");
     }
 
     // ── 初始化流式 ASR (Layer 3.2) ────────────────────
@@ -147,23 +158,23 @@ bool VoicePipeline::initialize()
                 std::cout << "   🎤 " << text << "\r" << std::flush;
             });
         } else {
-            std::cout << "   ⚠️ 流式 ASR 初始化失败，回退到离线模式" << std::endl;
+            LOG_INFO("   ⚠️ 流式 ASR 初始化失败，回退到离线模式");
         }
     }
 
     std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
-    std::cout << "   特性: ";
+    LOG_INFO("   特性: ");
     if (kws_.enabled()) std::cout << "唤醒词=\"" << cfg_.wake_word << "\" ";
     std::cout << "声纹(阈值=" << cfg_.sv_threshold << ") ";
     std::cout << "记忆(最近" << cfg_.max_rounds << "轮)";
     if (cfg_.skill_rag) std::cout << " RAG(" << cfg_.rag_docs_dir << ")";
-    std::cout << std::endl;
+    LOG_INFO("std::endl");
 
     std::cout << "   " << speaker_.status_text() << std::endl;
     std::cout << "   [Voiceprint] " << voiceprint_.status_text() << std::endl;
-    std::cout << std::endl;
+    LOG_INFO("std::endl");
 
     initialized_ = true;
     return true;
@@ -192,7 +203,7 @@ std::string VoicePipeline::process_text(const std::string& text)
                 reply = result.final_answer;
                 // 不在此处返回，继续到下方 reflection + memory
             } else if (!result.success) {
-                std::cout << "   [ReAct] 推理失败，降级到单步模式" << std::endl;
+                LOG_INFO("   [ReAct] 推理失败，降级到单步模式");
             }
         }
     }
@@ -243,7 +254,7 @@ std::string VoicePipeline::process_voice()
 
     std::string prompt = asr_.transcribe(wav_file);
     if (prompt.empty()) {
-        std::cout << "   ⚠️ 未识别到语音" << std::endl;
+        LOG_INFO("   ⚠️ 未识别到语音");
         std::remove(wav_file.c_str());
         return "";
     }
@@ -343,7 +354,7 @@ std::string VoicePipeline::process_voice_file(const std::string& wav_path)
 
     std::string prompt = asr_.transcribe(wav_path);
     if (prompt.empty()) {
-        std::cout << "   ⚠️ 未识别到语音" << std::endl;
+        LOG_INFO("   ⚠️ 未识别到语音");
         return "";
     }
 
@@ -399,7 +410,7 @@ bool VoicePipeline::enroll_speaker()
 {
     const std::string wav_file = "temp_enroll.wav";
 
-    std::cout << "   🎙️ 请说出你的名字（3秒后开始录音）..." << std::endl;
+    LOG_INFO("   🎙️ 请说出你的名字（3秒后开始录音）...");
     speak_and_play("请在提示音后说出你的名字");
 
     if (!recorder_.record(wav_file)) {
@@ -430,7 +441,7 @@ bool VoicePipeline::enroll_speaker()
     }
 
     // 重新录音（用于声纹注册，建议 >3 秒）
-    std::cout << "   🎙️ 请说一段话（用于声纹注册，3秒后开始）..." << std::endl;
+    LOG_INFO("   🎙️ 请说一段话（用于声纹注册，3秒后开始）...");
     speak_and_play("请说一小段话，用于声纹注册");
     std::remove(wav_file.c_str());
 
@@ -458,13 +469,193 @@ bool VoicePipeline::enroll_speaker()
 void VoicePipeline::clear_memory()
 {
     memory_.clear();
-    std::cout << "   🧹 对话记忆已清空" << std::endl;
+    LOG_INFO("   🧹 对话记忆已清空");
+}
+
+// ── 热配置重载 (Layer 4.4) ──────────────────────────────
+
+void VoicePipeline::reload_config(const PipelineConfig& new_cfg)
+{
+    LOG_INFO("[Config] ============ 热重载配置 ============");
+
+    int hot_changes = 0;
+    int warn_changes = 0;
+
+    // 辅助：比较 string 字段
+    auto diff_str = [&](const char* name,
+                         const std::string& old_val, const std::string& new_val,
+                         std::string& target) {
+        if (old_val != new_val) {
+            LOG_INFO("[Config] {}: \"{}\" → \"{}\"", name, old_val, new_val);
+            target = new_val;
+            return true;
+        }
+        return false;
+    };
+
+    // 辅助：比较数值字段
+    auto diff_val = [&](const char* name, auto old_val, auto new_val, auto& target) {
+        if (old_val != new_val) {
+            LOG_INFO("[Config] {}: {} → {}", name, old_val, new_val);
+            target = new_val;
+            return true;
+        }
+        return false;
+    };
+
+    // 辅助：仅记录警告（需重启字段）
+    auto warn_if = [&](const char* name, auto old_val, auto new_val) {
+        if (old_val != new_val) {
+            LOG_WARN("[Config] ⚠️  {}: \"{}\" → \"{}\" (需重启生效)", name, old_val, new_val);
+            return true;
+        }
+        return false;
+    };
+
+    // ── Tier 1: 完全热安全 ────────────────────────────
+
+    // LLM
+    if (diff_str("system_prompt", cfg_.system_prompt, new_cfg.system_prompt, cfg_.system_prompt)) {
+        llm_.set_system_prompt(cfg_.system_prompt);
+        hot_changes++;
+    }
+
+    // TTS
+    if (diff_str("tts_backend", cfg_.tts_backend, new_cfg.tts_backend, cfg_.tts_backend))
+        hot_changes++;
+    diff_val("tts_rate", cfg_.tts_rate, new_cfg.tts_rate, cfg_.tts_rate);
+
+    // 唤醒词
+    if (diff_str("wake_word", cfg_.wake_word, new_cfg.wake_word, cfg_.wake_word))
+        hot_changes++;
+
+    // 声纹阈值
+    if (diff_val("sv_threshold", cfg_.sv_threshold, new_cfg.sv_threshold, cfg_.sv_threshold))
+        hot_changes++;
+
+    // 对话记忆
+    bool mem_changed = false;
+    if (cfg_.max_rounds != new_cfg.max_rounds) {
+        LOG_INFO("[Config] max_rounds: {} → {}", cfg_.max_rounds, new_cfg.max_rounds);
+        cfg_.max_rounds = new_cfg.max_rounds;
+        mem_changed = true;
+    }
+    if (cfg_.max_tokens != new_cfg.max_tokens) {
+        LOG_INFO("[Config] max_tokens: {} → {}", cfg_.max_tokens, new_cfg.max_tokens);
+        cfg_.max_tokens = new_cfg.max_tokens;
+        mem_changed = true;
+    }
+    if (mem_changed) {
+        memory_.set_limits(cfg_.max_rounds, cfg_.max_tokens);
+        hot_changes++;
+    }
+
+    // ReAct
+    if (diff_val("react_max_steps", cfg_.react_max_steps, new_cfg.react_max_steps, cfg_.react_max_steps))
+        hot_changes++;
+
+    // Multi-Agent
+    if (diff_str("ma_critic_model", cfg_.ma_critic_model, new_cfg.ma_critic_model, cfg_.ma_critic_model))
+        hot_changes++;
+    if (diff_val("ma_max_rounds", cfg_.ma_max_rounds, new_cfg.ma_max_rounds, cfg_.ma_max_rounds))
+        hot_changes++;
+
+    // VAD 参数（capture_loop 每帧读取 cfg_）
+    diff_val("vad_energy_threshold", cfg_.vad_energy_threshold, new_cfg.vad_energy_threshold, cfg_.vad_energy_threshold);
+    diff_val("vad_min_speech_frames", cfg_.vad_min_speech_frames, new_cfg.vad_min_speech_frames, cfg_.vad_min_speech_frames);
+    diff_val("vad_min_silence_frames", cfg_.vad_min_silence_frames, new_cfg.vad_min_silence_frames, cfg_.vad_min_silence_frames);
+    diff_val("vad_pre_speech_frames", cfg_.vad_pre_speech_frames, new_cfg.vad_pre_speech_frames, cfg_.vad_pre_speech_frames);
+    diff_val("vad_adaptive_factor", cfg_.vad_adaptive_factor, new_cfg.vad_adaptive_factor, cfg_.vad_adaptive_factor);
+    diff_val("vad_min_energy", cfg_.vad_min_energy, new_cfg.vad_min_energy, cfg_.vad_min_energy);
+    diff_val("vad_cooldown_frames", cfg_.vad_cooldown_frames, new_cfg.vad_cooldown_frames, cfg_.vad_cooldown_frames);
+
+    // 流式 ASR 运行时参数
+    diff_val("streaming_min_chunk", cfg_.streaming_min_chunk, new_cfg.streaming_min_chunk, cfg_.streaming_min_chunk);
+    diff_val("streaming_chunk_intv", cfg_.streaming_chunk_intv, new_cfg.streaming_chunk_intv, cfg_.streaming_chunk_intv);
+
+    // 技能开关
+    auto diff_skill = [&](const char* name, bool old_val, bool new_val, bool& target) {
+        if (old_val != new_val) {
+            LOG_INFO("[Config] skill_{}: {} → {}", name, old_val, new_val);
+            target = new_val;
+            skill_mgr_.set_enabled(name, new_val);
+            return true;
+        }
+        return false;
+    };
+    diff_skill("weather",    cfg_.skill_weather,    new_cfg.skill_weather,    cfg_.skill_weather);
+    diff_skill("time",       cfg_.skill_time,       new_cfg.skill_time,       cfg_.skill_time);
+    diff_skill("web_search", cfg_.skill_web_search, new_cfg.skill_web_search, cfg_.skill_web_search);
+
+    // ── Tier 2: 需重建对象（更新字段但警告）──────────
+
+    if (warn_if("fc_enabled", cfg_.fc_enabled, new_cfg.fc_enabled)) {
+        cfg_.fc_enabled = new_cfg.fc_enabled;
+        warn_changes++;
+    }
+    if (diff_str("fc_model", cfg_.fc_model, new_cfg.fc_model, cfg_.fc_model))
+        warn_changes++;
+
+    if (warn_if("react_enabled", cfg_.react_enabled, new_cfg.react_enabled)) {
+        cfg_.react_enabled = new_cfg.react_enabled;
+        warn_changes++;
+    }
+    if (warn_if("reflect_enabled", cfg_.reflect_enabled, new_cfg.reflect_enabled)) {
+        cfg_.reflect_enabled = new_cfg.reflect_enabled;
+        warn_changes++;
+    }
+    if (diff_str("reflect_model", cfg_.reflect_model, new_cfg.reflect_model, cfg_.reflect_model))
+        warn_changes++;
+
+    if (warn_if("multi_agent_enabled", cfg_.multi_agent_enabled, new_cfg.multi_agent_enabled)) {
+        cfg_.multi_agent_enabled = new_cfg.multi_agent_enabled;
+        warn_changes++;
+    }
+    if (warn_if("streaming_asr_enabled", cfg_.streaming_asr_enabled, new_cfg.streaming_asr_enabled)) {
+        cfg_.streaming_asr_enabled = new_cfg.streaming_asr_enabled;
+        warn_changes++;
+    }
+    if (warn_if("skill_rag", cfg_.skill_rag, new_cfg.skill_rag)) {
+        cfg_.skill_rag = new_cfg.skill_rag;
+        warn_changes++;
+    }
+    if (diff_str("rag_docs_dir", cfg_.rag_docs_dir, new_cfg.rag_docs_dir, cfg_.rag_docs_dir))
+        warn_changes++;
+
+    // ── Tier 3: 需重启 ──────────────────────────────
+
+    warn_if("asr_model_path",     cfg_.asr_model_path,     new_cfg.asr_model_path);
+    warn_if("ollama_host",        cfg_.ollama_host,        new_cfg.ollama_host);
+    warn_if("llm_model",          cfg_.llm_model,          new_cfg.llm_model);
+    warn_if("piper_model_path",   cfg_.piper_model_path,   new_cfg.piper_model_path);
+    warn_if("tts_voice",          cfg_.tts_voice,          new_cfg.tts_voice);
+    warn_if("sv_enroll_dir",      cfg_.sv_enroll_dir,      new_cfg.sv_enroll_dir);
+    warn_if("embedding_backend",  cfg_.embedding_backend,  new_cfg.embedding_backend);
+    warn_if("embedding_model_dir",cfg_.embedding_model_dir,new_cfg.embedding_model_dir);
+    warn_if("sample_rate",        cfg_.sample_rate,        new_cfg.sample_rate);
+
+    // vad_backend 也需要重建 VAD 对象
+    if (warn_if("vad_backend", cfg_.vad_backend, new_cfg.vad_backend)) {
+        cfg_.vad_backend = new_cfg.vad_backend;
+        warn_changes++;
+    }
+    if (warn_if("streaming_asr_backend", cfg_.streaming_asr_backend, new_cfg.streaming_asr_backend)) {
+        cfg_.streaming_asr_backend = new_cfg.streaming_asr_backend;
+        warn_changes++;
+    }
+    if (diff_str("streaming_asr_model", cfg_.streaming_asr_model, new_cfg.streaming_asr_model, cfg_.streaming_asr_model))
+        warn_changes++;
+
+    // ── 汇总 ─────────────────────────────────────────
+
+    LOG_INFO("[Config] ✅ 热应用完成 ({} 项已生效, {} 项需重启)",
+             hot_changes, warn_changes);
 }
 
 void VoicePipeline::speak_and_play(const std::string& text,
                                      const std::string& user_context)
 {
-    std::cout << "   🔊 播放中..." << std::endl;
+    LOG_INFO("   🔊 播放中...");
 
     if (cfg_.tts_backend == "piper") {
         tts_.synthesize(text, "", user_context);
@@ -482,7 +673,7 @@ void VoicePipeline::speak_and_play(const std::string& text,
 void VoicePipeline::run_interactive()
 {
     if (!initialized_) {
-        std::cerr << "❌ 管线未初始化" << std::endl;
+        LOG_ERROR("❌ 管线未初始化");
         return;
     }
 
@@ -500,13 +691,13 @@ void VoicePipeline::run_interactive()
         segment_queue_ = std::queue<Segment>();
     }
 
-    std::cout << std::endl;
-    std::cout << "============================================================" << std::endl;
-    std::cout << "  🎤 交互模式已启动（支持语音打断）" << std::endl;
-    std::cout << "  直接说话即可交互，机器人说话时你可以随时打断" << std::endl;
-    std::cout << "  按 Ctrl+C 退出交互模式" << std::endl;
-    std::cout << "============================================================" << std::endl;
-    std::cout << std::endl;
+    LOG_INFO("std::endl");
+    LOG_INFO("============================================================");
+    LOG_INFO("  🎤 交互模式已启动（支持语音打断）");
+    LOG_INFO("  直接说话即可交互，机器人说话时你可以随时打断");
+    LOG_INFO("  按 Ctrl+C 退出交互模式");
+    LOG_INFO("============================================================");
+    LOG_INFO("std::endl");
 
     // 启动两个工作线程
     capture_thread_ = std::thread(&VoicePipeline::capture_loop, this);
@@ -521,7 +712,7 @@ void VoicePipeline::run_interactive()
 
 void VoicePipeline::stop_interactive()
 {
-    std::cout << "\n⏹️  收到停止信号..." << std::endl;
+    LOG_INFO("\n⏹️  收到停止信号...");
     interactive_running_ = false;
 
     // 停止当前播放
@@ -543,7 +734,7 @@ void VoicePipeline::capture_loop()
     FILE* pipe = popen(
         "arecord -f S16_LE -r 16000 -c 1 -t raw -q 2>/dev/null", "r");
     if (!pipe) {
-        std::cerr << "❌ 无法启动录音设备" << std::endl;
+        LOG_ERROR("❌ 无法启动录音设备");
         interactive_running_ = false;
         queue_cv_.notify_all();
         return;
@@ -551,11 +742,13 @@ void VoicePipeline::capture_loop()
 
     // 从 PipelineConfig 构造 VAD 配置
     VADConfig vad_cfg;
-    vad_cfg.energy_threshold   = cfg_.vad_energy_threshold;
-    vad_cfg.min_speech_frames  = cfg_.vad_min_speech_frames;
-    vad_cfg.min_silence_frames = cfg_.vad_min_silence_frames;
-    vad_cfg.pre_speech_frames  = cfg_.vad_pre_speech_frames;
-    vad_cfg.adaptive_factor    = cfg_.vad_adaptive_factor;
+    vad_cfg.energy_threshold       = cfg_.vad_energy_threshold;
+    vad_cfg.min_speech_frames      = cfg_.vad_min_speech_frames;
+    vad_cfg.min_silence_frames     = cfg_.vad_min_silence_frames;
+    vad_cfg.pre_speech_frames      = cfg_.vad_pre_speech_frames;
+    vad_cfg.adaptive_factor        = cfg_.vad_adaptive_factor;
+    vad_cfg.min_energy_threshold   = cfg_.vad_min_energy;
+    vad_cfg.silence_cooldown_frames = cfg_.vad_cooldown_frames;
 
     auto vad = create_vad(cfg_.vad_backend, vad_cfg);
 
@@ -568,6 +761,9 @@ void VoicePipeline::capture_loop()
     // 音频预处理器: 去直流偏置 + 噪声门
     Denoiser denoiser(16000);
 
+    // 播放状态跟踪（用于播放结束后 VAD 重置）
+    bool was_playing = false;
+
     std::cout << "🎙️  麦克风已开启，开始监听... (VAD: " << cfg_.vad_backend << ")" << std::endl;
 
     while (interactive_running_) {
@@ -575,7 +771,7 @@ void VoicePipeline::capture_loop()
         size_t nread = fread(raw_buf.data(), 1, frame_bytes, pipe);
         if (nread != (size_t)frame_bytes) {
             if (interactive_running_) {
-                std::cerr << "⚠️ 录音读取异常" << std::endl;
+                LOG_WARN("⚠️ 录音读取异常");
             }
             break;
         }
@@ -588,40 +784,41 @@ void VoicePipeline::capture_loop()
         // 音频预处理: 去直流 + 噪声门
         denoiser.process_frame(float_buf.data(), frame_samples);
 
+        // ── 播放结束检测：重置 VAD 丢弃回声 ──
+        bool playing = is_playing_.load();
+        if (!playing && was_playing) {
+            vad->reset();
+            if (stream_asr_.initialized()) {
+                stream_asr_.cancel();
+            }
+        }
+        was_playing = playing;
+
         // 持续喂预录音缓冲区
         vad->feed_pre_buffer(float_buf.data(), frame_samples);
 
         // VAD 处理
         VADState vad_state = vad->process_frame(float_buf.data(), frame_samples);
-
-        // ── 流式 ASR：语音期间持续喂帧 ──────────────────
-        // 注意：只喂语音帧（含 SPEECH_START/ONGOING），
-        // VAD 的 pre_buffer（~300ms 静音）不喂入，影响可忽略
         bool in_speech = vad->in_speech();
-        if (stream_asr_.initialized() && in_speech) {
+
+        // ── 流式 ASR：仅当 process 空闲时喂帧 ────────────
+        bool busy = process_busy_.load();
+        if (stream_asr_.initialized() && in_speech && !busy) {
             if (vad_state == VADState::SPEECH_START) {
                 stream_asr_.start_utterance();
             }
             stream_asr_.feed(float_buf.data(), frame_samples);
         }
 
-        // 🔴 打断：检测到语音开始 且 正在播放 → 立刻停止播放
-        if (vad_state == VADState::SPEECH_START && is_playing_.load()) {
-            pid_t pid = player_pid_.exchange(-1);
-            if (pid > 0) {
-                AudioPlayer::stop_async(pid);
-                std::cout << "\n🔴 检测到语音，已打断当前播放！" << std::endl;
-            }
-            is_playing_ = false;
-            // 取消旧的流式 ASR（开始新的）
-            if (stream_asr_.initialized()) {
-                stream_asr_.cancel();
-                stream_asr_.start_utterance();
-            }
+        // ── 安全阀：最大语音时长 10 秒 ──────────────────
+        bool speech_timeout = false;
+        if (in_speech && vad->speech_sample_count() > 10 * 16000) {
+            LOG_WARN("⚠️ 语音段超过10秒，强制截断 (VAD可能卡在噪声中)");
+            speech_timeout = true;
         }
 
-        // 语音段结束 → 入队（流式 ASR 预识别文字）
-        if (vad->segment_ready()) {
+        // 语音段结束 → 入队（仅当 process 空闲时）
+        if ((vad->segment_ready() || speech_timeout) && !busy) {
             auto segment = vad->pop_segment();
 
             // 检查最小长度：至少 0.5 秒
@@ -638,13 +835,52 @@ void VoicePipeline::capture_loop()
             std::string stream_text;
             if (stream_asr_.initialized()) {
                 stream_text = stream_asr_.finalize();
-                std::cout << "\n📝 捕获语音段 #" << gen
+            }
+
+            // ── 垃圾识别过滤 ──
+            // 多个维度判定：能量过低 / 纯标点 / 单字符 / 短英文幻觉
+            bool is_garbage = false;
+            if (stream_text.empty()) {
+                is_garbage = true;
+            } else {
+                // 计算语音段平均 RMS 能量
+                float sum_sq = 0.0f;
+                for (auto s : segment) sum_sq += s * s;
+                float avg_rms = std::sqrt(sum_sq / segment.size());
+
+                // 纯标点/空白
+                bool all_punct = true;
+                for (unsigned char c : stream_text) {
+                    if (c > 0x7F || std::isalnum(c)) { all_punct = false; break; }
+                }
+                if (all_punct) {
+                    is_garbage = true;
+                }
+                // 能量极低（< 0.005）→ 几乎肯定是回声/静音
+                else if (avg_rms < 0.005f && stream_text.size() <= 10) {
+                    is_garbage = true;
+                }
+                // 短英文文本 + 低能量 → SenseVoice 静音幻觉
+                else if (avg_rms < vad_cfg.min_energy_threshold) {
+                    bool all_ascii = true;
+                    for (unsigned char c : stream_text) {
+                        if (c > 0x7F) { all_ascii = false; break; }
+                    }
+                    if (all_ascii && stream_text.size() <= 6) {
+                        is_garbage = true;
+                    }
+                }
+            }
+            if (is_garbage) {
+                std::cout << "\n   🗑️  丢弃噪音段 #" << gen
                           << " (" << duration << "s)"
                           << " → \"" << stream_text << "\"" << std::endl;
-            } else {
-                std::cout << "\n📝 捕获语音段 #" << gen
-                          << " (" << duration << "s)" << std::endl;
+                continue;
             }
+
+            std::cout << "\n📝 捕获语音段 #" << gen
+                      << " (" << duration << "s)"
+                      << " → \"" << stream_text << "\"" << std::endl;
 
             // ── 声学情感分析 (Layer 3.3) ──────────────────
             VoiceEmotionResult voice_emo;
@@ -699,6 +935,9 @@ void VoicePipeline::process_loop()
             segment_queue_.pop();
         }
 
+        // 标记处理中 → capture 线程暂停收集新段（避免 generation 递增导致过期）
+        process_busy_ = true;
+
         int my_gen = seg.generation;
 
         // 检查是否已有更新的语音段（当前段已过期）
@@ -715,8 +954,8 @@ void VoicePipeline::process_loop()
         } else {
             // 传统路径：写入 WAV → 离线 ASR
             const std::string wav_file = "temp_interactive_" + std::to_string(my_gen) + ".wav";
-            if (!write_wav_float(wav_file, seg.samples, 16000)) {
-                std::cerr << "   ❌ 写入 WAV 失败" << std::endl;
+            if (!wav_utils::write_wav_float(wav_file, seg.samples, 16000)) {
+                LOG_ERROR("   ❌ 写入 WAV 失败");
                 continue;
             }
             prompt = asr_.transcribe(wav_file);
@@ -724,7 +963,7 @@ void VoicePipeline::process_loop()
         }
 
         if (prompt.empty()) {
-            std::cout << "   ⚠️ 未识别到有效语音" << std::endl;
+            LOG_INFO("   ⚠️ 未识别到有效语音");
             continue;
         }
 
@@ -736,14 +975,14 @@ void VoicePipeline::process_loop()
 
         // 3) 唤醒词检查（可选的）／声纹识别
         if (kws_.enabled() && !kws_.detect(prompt)) {
-            std::cout << "   ⚠️ 未检测到唤醒词，跳过" << std::endl;
+            LOG_INFO("   ⚠️ 未检测到唤醒词，跳过");
             continue;
         }
 
         // 声纹识别（交互模式中可选，仅在声纹库有用户时启用）
         if (voiceprint_.has_any() && !seg.samples.empty()) {
             const std::string vp_wav = "temp_vp_" + std::to_string(my_gen) + ".wav";
-            if (write_wav_float(vp_wav, seg.samples, 16000)) {
+            if (wav_utils::write_wav_float(vp_wav, seg.samples, 16000)) {
                 auto id = voiceprint_.identify(vp_wav);
                 std::remove(vp_wav.c_str());
                 if (id.identified()) {
@@ -813,15 +1052,26 @@ void VoicePipeline::process_loop()
         // 7) TTS + 播放（传递声学情感用于韵律融合）
         const VoiceEmotionResult* ve = seg.voice_emo.confidence > 0.0f ? &seg.voice_emo : nullptr;
         if (cfg_.tts_backend == "piper") {
-            // Piper 流式管道：边合成边播，阻塞直到播完
-            std::cout << "   🔊 播放中..." << std::endl;
-            is_playing_ = true;
-            tts_.synthesize(reply, "", prompt, ve);
-            is_playing_ = false;
+            // Piper：写出 WAV → 异步播放（可被打断）
+            const std::string tts_wav = "temp_reply_interactive_piper.wav";
+            if (tts_.synthesize(reply, tts_wav, prompt, ve)) {
+                LOG_INFO("   🔊 播放中...");
+                is_playing_ = true;
+                pid_t pid = AudioPlayer::play_async(tts_wav);
+                player_pid_ = pid;
+                if (pid > 0) {
+                    int status;
+                    waitpid(pid, &status, 0);
+                    pid_t expected = pid;
+                    player_pid_.compare_exchange_strong(expected, -1);
+                }
+                is_playing_ = false;
+                std::remove(tts_wav.c_str());
+            }
         } else {
             const std::string tts_file = "temp_reply_interactive_" + std::to_string(my_gen) + ".wav";
             if (!tts_.synthesize(reply, tts_file, prompt, ve)) {
-                std::cerr << "   ❌ TTS 合成失败" << std::endl;
+                LOG_ERROR("   ❌ TTS 合成失败");
                 continue;
             }
 
@@ -833,7 +1083,7 @@ void VoicePipeline::process_loop()
             }
 
             // 7) 异步播放（可被打断）
-            std::cout << "   🔊 播放中..." << std::endl;
+            LOG_INFO("   🔊 播放中...");
             is_playing_ = true;
             pid_t pid = AudioPlayer::play_async(tts_file);
             player_pid_ = pid;
@@ -848,56 +1098,8 @@ void VoicePipeline::process_loop()
             is_playing_ = false;
             std::remove(tts_file.c_str());
         }
+
+        // 处理完成 → capture 线程可以继续收集新语音段
+        process_busy_ = false;
     }
-}
-
-// ── WAV 写入工具 ──────────────────────────────────────
-
-bool VoicePipeline::write_wav_float(const std::string& path,
-                                     const std::vector<float>& samples,
-                                     int sample_rate)
-{
-    // float → int16
-    std::vector<int16_t> pcm(samples.size());
-    for (size_t i = 0; i < samples.size(); ++i) {
-        float s = samples[i];
-        if (s > 1.0f)  s = 1.0f;
-        if (s < -1.0f) s = -1.0f;
-        pcm[i] = (int16_t)(s * 32767.0f);
-    }
-
-    std::ofstream out(path, std::ios::binary);
-    if (!out) return false;
-
-    uint32_t data_size = (uint32_t)(pcm.size() * sizeof(int16_t));
-    uint32_t chunk_size = 36 + data_size;
-
-    // RIFF header
-    out.write("RIFF", 4);
-    out.write(reinterpret_cast<const char*>(&chunk_size), 4);
-    out.write("WAVE", 4);
-
-    // fmt chunk (16-bit PCM, mono)
-    out.write("fmt ", 4);
-    uint32_t fmt_size = 16;
-    uint16_t audio_format = 1;
-    uint16_t num_channels = 1;
-    uint16_t bits_per_sample = 16;
-    uint32_t byte_rate = sample_rate * num_channels * bits_per_sample / 8;
-    uint16_t block_align = num_channels * bits_per_sample / 8;
-
-    out.write(reinterpret_cast<const char*>(&fmt_size), 4);
-    out.write(reinterpret_cast<const char*>(&audio_format), 2);
-    out.write(reinterpret_cast<const char*>(&num_channels), 2);
-    out.write(reinterpret_cast<const char*>(&sample_rate), 4);
-    out.write(reinterpret_cast<const char*>(&byte_rate), 4);
-    out.write(reinterpret_cast<const char*>(&block_align), 2);
-    out.write(reinterpret_cast<const char*>(&bits_per_sample), 2);
-
-    // data chunk
-    out.write("data", 4);
-    out.write(reinterpret_cast<const char*>(&data_size), 4);
-    out.write(reinterpret_cast<const char*>(pcm.data()), data_size);
-
-    return true;
 }

@@ -1,3 +1,4 @@
+#include "logger.h"
 /**
  * 技能管理器 — 实现
  *
@@ -132,19 +133,6 @@ SkillResult SkillManager::detect_and_execute(const std::string& user_text)
     }
 
     return {false, "", ""};
-}
-
-std::string SkillManager::get_skills_context() const
-{
-    std::stringstream ss;
-    for (auto& s : skills_) {
-        if (!s->enabled()) continue;
-        std::string desc = s->describe();
-        if (!desc.empty()) {
-            ss << "- " << desc << "\n";
-        }
-    }
-    return ss.str();
 }
 
 std::string SkillManager::get_system_context()

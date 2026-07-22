@@ -19,6 +19,7 @@
 
 #include <iostream>
 #include <sstream>
+#include "logger.h"
 
 using json = nlohmann::json;
 
@@ -130,7 +131,7 @@ MultiAgentResult MultiAgentEngine::collaborate(
         std::string feedback = ask_agent(crit_prompt.str(), critic_model, crit_msgs);
 
         if (feedback.empty()) {
-            std::cout << "   [MultiAgent] ⚠️ Critic 无响应，保持当前回复" << std::endl;
+            LOG_INFO("   [MultiAgent] ⚠️ Critic 无响应，保持当前回复");
             break;
         }
 
@@ -179,7 +180,7 @@ MultiAgentResult MultiAgentEngine::collaborate(
         std::string improved = ask_agent(gen_prompt.str(), generator_model, gen_msgs);
 
         if (improved.empty()) {
-            std::cout << "   [MultiAgent] ⚠️ Generator 无响应，保持当前回复" << std::endl;
+            LOG_INFO("   [MultiAgent] ⚠️ Generator 无响应，保持当前回复");
             break;
         }
 

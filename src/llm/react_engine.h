@@ -75,9 +75,6 @@ public:
                     const std::string& history_context = "",
                     int max_steps = 5);
 
-    /// 设置超时（秒）
-    void set_timeout(long sec) { timeout_sec_ = sec; }
-
 private:
     std::string host_;
     std::string model_;

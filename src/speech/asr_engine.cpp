@@ -21,6 +21,7 @@
 #include <iostream>
 #include <chrono>
 #include <cstring>
+#include "logger.h"
 
 // ── ASREngine ────────────────────────────────────────
 
@@ -69,19 +70,19 @@ bool ASREngine::initialize()
     recognizer_ = SherpaOnnxCreateOfflineRecognizer(&config);
 
     if (!recognizer_) {
-        std::cerr << "❌ 创建 recognizer 失败" << std::endl;
+        LOG_ERROR("❌ 创建 recognizer 失败");
         std::cerr << "   请确保模型文件存在: " << model_path_ << std::endl;
-        std::cerr << "   下载: https://github.com/k2-fsa/sherpa-onnx/releases" << std::endl;
+        LOG_ERROR("   下载: https://github.com/k2-fsa/sherpa-onnx/releases");
         return false;
     }
 #else
-    std::cerr << "⚠️  sherpa-onnx 未安装（跳过）" << std::endl;
+    LOG_WARN("⚠️  sherpa-onnx 未安装（跳过）");
     initialized_ = true;
     return true;
 #endif
 
     initialized_ = true;
-    std::cout << "✅" << std::endl;
+    LOG_INFO("✅");
     return true;
 }
 
@@ -104,7 +105,7 @@ std::string ASREngine::transcribe(const std::string& wav_path)
     // 创建离线 stream
     const SherpaOnnxOfflineStream* stream = SherpaOnnxCreateOfflineStream(recognizer_);
     if (!stream) {
-        std::cerr << "   [ASR] 创建 stream 失败" << std::endl;
+        LOG_ERROR("   [ASR] 创建 stream 失败");
         SherpaOnnxFreeWave(wave);
         return "";
     }
@@ -134,7 +135,7 @@ std::string ASREngine::transcribe(const std::string& wav_path)
     SherpaOnnxDestroyOfflineStream(stream);
     SherpaOnnxFreeWave(wave);
 #else
-    std::cerr << "   [ASR] ⚠️ sherpa-onnx 不可用，返回假结果" << std::endl;
+    LOG_WARN("   [ASR] ⚠️ sherpa-onnx 不可用，返回假结果");
     text = "[ASR 未就绪] " + wav_path;
 #endif
 

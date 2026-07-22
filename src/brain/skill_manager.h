@@ -52,7 +52,6 @@ public:
 
     /// 启用/禁用 Function Calling（不影响关键字匹配降级）
     void set_function_calling_enabled(bool v) { fc_enabled_ = v; }
-    bool function_calling_enabled() const { return fc_enabled_; }
 
     /// 启用/禁用某个技能
     void set_enabled(const std::string& name, bool enabled);
@@ -60,9 +59,6 @@ public:
     /// 检测意图 + 执行技能（混合调度）
     /// @return 如果命中则返回结果，否则 hit=false
     SkillResult detect_and_execute(const std::string& user_text);
-
-    /// 获取所有已启用技能的能力描述（注入 system prompt）
-    std::string get_skills_context() const;
 
     /// 获取系统信息上下文（时间等总是有用的信息）
     static std::string get_system_context();

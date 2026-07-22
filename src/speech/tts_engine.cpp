@@ -7,6 +7,7 @@
 
 #include "tts_engine.h"
 #include "prosody.h"
+#include "wav_utils.h"
 
 #include "espeak_min.h"
 #include <fstream>
@@ -16,7 +17,6 @@
 #include <iostream>
 #include <cstdio>
 #include <cstdlib>
-#include <cstdint>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -24,6 +24,7 @@
 #include <cctype>
 #include <algorithm>
 #include <unordered_map>
+#include "logger.h"
 
 // ── TTS 文本预处理 ────────────────────────────────────
 //
@@ -339,45 +340,6 @@ static int audio_callback(short* wav, int numsamples, espeak_EVENT* /*events*/)
     return 0;
 }
 
-// ── WAV 写入工具 ─────────────────────────────────────
-
-static bool write_wav(const std::string& path,
-                      const std::vector<int16_t>& samples,
-                      int sample_rate = 22050)
-{
-    std::ofstream out(path, std::ios::binary);
-    if (!out) return false;
-
-    uint32_t data_size = samples.size() * sizeof(int16_t);
-    uint32_t chunk_size = 36 + data_size;
-
-    out.write("RIFF", 4);
-    out.write(reinterpret_cast<const char*>(&chunk_size), 4);
-    out.write("WAVE", 4);
-
-    out.write("fmt ", 4);
-    uint32_t fmt_size = 16;
-    uint16_t audio_format = 1;
-    uint16_t num_channels = 1;
-    uint16_t bits_per_sample = 16;
-    uint32_t byte_rate = sample_rate * num_channels * bits_per_sample / 8;
-    uint16_t block_align = num_channels * bits_per_sample / 8;
-
-    out.write(reinterpret_cast<const char*>(&fmt_size), 4);
-    out.write(reinterpret_cast<const char*>(&audio_format), 2);
-    out.write(reinterpret_cast<const char*>(&num_channels), 2);
-    out.write(reinterpret_cast<const char*>(&sample_rate), 4);
-    out.write(reinterpret_cast<const char*>(&byte_rate), 4);
-    out.write(reinterpret_cast<const char*>(&block_align), 2);
-    out.write(reinterpret_cast<const char*>(&bits_per_sample), 2);
-
-    out.write("data", 4);
-    out.write(reinterpret_cast<const char*>(&data_size), 4);
-    out.write(reinterpret_cast<const char*>(samples.data()), data_size);
-
-    return true;
-}
-
 // ── 路径工具 ─────────────────────────────────────────
 
 static std::string expand_tilde(const std::string& path)
@@ -527,7 +489,7 @@ bool TTSEngine::init_espeak()
     espeak_SetParameter(espeakRATE, rate_, 0);
 
     initialized_ = true;
-    std::cout << "✅" << std::endl;
+    LOG_INFO("✅");
     return true;
 }
 
@@ -540,18 +502,18 @@ bool TTSEngine::synthesize_espeak(const std::string& text, const std::string& ou
                                     0, POS_CHARACTER, 0,
                                     espeakCHARS_UTF8, nullptr, nullptr);
     if (err != EE_OK) {
-        std::cerr << "[TTS] espeak_Synth 失败" << std::endl;
+        LOG_ERROR("[TTS] espeak_Synth 失败");
         return false;
     }
 
     espeak_Synchronize();
 
     if (g_tts_audio.empty()) {
-        std::cerr << "[TTS] 合成结果为空" << std::endl;
+        LOG_ERROR("[TTS] 合成结果为空");
         return false;
     }
 
-    return write_wav(output_path, g_tts_audio);
+    return wav_utils::write_wav(output_path, g_tts_audio);
 }
 
 // ── Piper 后端（常驻进程）──────────────��─────────────
@@ -608,7 +570,7 @@ bool TTSEngine::init_piper()
 
     // 不能用 popen 做双向！需要用 pipe + fork
     // 重新实现...
-    std::cerr << "⚠️  需要双向管道，改用 fork/pipe 方案" << std::endl;
+    LOG_WARN("⚠️  需要双向管道，改用 fork/pipe 方案");
 
     // 先清理
     if (piper_in_) { pclose(piper_in_); piper_in_ = nullptr; }
@@ -617,7 +579,7 @@ bool TTSEngine::init_piper()
     int from_child[2]; // 子写 → 父读 (stdout)
 
     if (pipe(to_child) < 0 || pipe(from_child) < 0) {
-        std::cerr << "❌ pipe 创建失败" << std::endl;
+        LOG_ERROR("❌ pipe 创建失败");
         return false;
     }
 
@@ -649,7 +611,7 @@ bool TTSEngine::init_piper()
     piper_out_ = fdopen(from_child[0], "r");
 
     if (!piper_in_ || !piper_out_) {
-        std::cerr << "❌ fdopen 失败" << std::endl;
+        LOG_ERROR("❌ fdopen 失败");
         return false;
     }
 
@@ -658,7 +620,7 @@ bool TTSEngine::init_piper()
     piper_sample_rate_ = 22050;
 
     initialized_ = true;
-    std::cout << "✅ (模型已预加载)" << std::endl;
+    LOG_INFO("✅ (模型已预加载)");
     return true;
 }
 
@@ -682,7 +644,7 @@ bool TTSEngine::read_exact(void* buf, size_t len)
         size_t n = fread(p + total, 1, len - total, piper_out_);
         if (n == 0) {
             if (ferror(piper_out_)) {
-                std::cerr << "[TTS] 读取 Piper 输出失败" << std::endl;
+                LOG_ERROR("[TTS] 读取 Piper 输出失败");
             }
             return false;
         }
@@ -691,7 +653,7 @@ bool TTSEngine::read_exact(void* buf, size_t len)
     return true;
 }
 
-bool TTSEngine::synthesize_piper(const std::string& text, const std::string& /*output_path*/)
+bool TTSEngine::synthesize_piper(const std::string& text, const std::string& output_path)
 {
     if (!piper_in_ || !piper_out_) return false;
 
@@ -718,13 +680,21 @@ bool TTSEngine::synthesize_piper(const std::string& text, const std::string& /*o
     std::vector<char> pcm(pcm_len);
     if (!read_exact(pcm.data(), pcm_len)) return false;
 
-    // 4. 通过管道喂给 aplay，清除 conda LD_LIBRARY_PATH
+    // 4. 如果指定了输出路径 → 写入 WAV 文件（供调用方异步播放/打断）
+    if (!output_path.empty()) {
+        int num_samples = pcm_len / 2;  // S16_LE → int16_t samples
+        std::vector<int16_t> audio(num_samples);
+        std::memcpy(audio.data(), pcm.data(), pcm_len);
+        return wav_utils::write_wav(output_path, audio, piper_sample_rate_);
+    }
+
+    // 5. 管道播放（默认，阻塞直到播完）
     std::string aplay_cmd = "env -u LD_LIBRARY_PATH aplay -q -f S16_LE -r "
                           + std::to_string(piper_sample_rate_) + " -c 1";
 
     FILE* aplay = popen(aplay_cmd.c_str(), "w");
     if (!aplay) {
-        std::cerr << "[TTS] 启动 aplay 失败" << std::endl;
+        LOG_ERROR("[TTS] 启动 aplay 失败");
         return false;
     }
 

@@ -1,3 +1,4 @@
+#include "logger.h"
 /**
  * 管线配置 — JSON 文件加载
  *
@@ -11,8 +12,6 @@
 #include <fstream>
 #include <iostream>
 #include <cstdlib>
-#include <climits>
-#include <unistd.h>
 
 using json = nlohmann::json;
 
@@ -26,6 +25,8 @@ static void try_get(const json& j, const char* key, T& target)
         if (!val.is_null()) {
             if constexpr (std::is_same_v<T, int>)
                 target = val.get<int>();
+            else if constexpr (std::is_same_v<T, bool>)
+                target = val.get<bool>();
             else if constexpr (std::is_same_v<T, float>)
                 target = val.get<float>();
             else if constexpr (std::is_same_v<T, std::string>)
@@ -97,6 +98,8 @@ bool PipelineConfig::load_from_file(const std::string& path)
         try_get(v, "min_silence_frames", vad_min_silence_frames);
         try_get(v, "pre_speech_frames",  vad_pre_speech_frames);
         try_get(v, "adaptive_factor",    vad_adaptive_factor);
+        try_get(v, "min_energy",         vad_min_energy);
+        try_get(v, "cooldown_frames",    vad_cooldown_frames);
     }
 
     // ── 对话记忆 ───────────────────────────────────
@@ -146,6 +149,13 @@ bool PipelineConfig::load_from_file(const std::string& path)
     }
 
     // ── 技能 ────────────────────────────────────────
+    // ── Embedding (Layer 4.2) ──────────────────────────
+    if (j.contains("embedding")) {
+        auto& e = j["embedding"];
+        try_get(e, "backend",   embedding_backend);
+        try_get(e, "model_dir", embedding_model_dir);
+    }
+
     if (j.contains("skills")) {
         auto& s = j["skills"];
         if (s.contains("weather")) {

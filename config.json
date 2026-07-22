@@ -27,13 +27,15 @@
     "backend": "adaptive",
     "energy_threshold": 0.003,
     "min_speech_frames": 8,
-    "min_silence_frames": 30,
+    "min_silence_frames": 20,
     "pre_speech_frames": 15,
-    "adaptive_factor": 3.0
+    "adaptive_factor": 3.0,
+    "min_energy": 0.006,
+    "cooldown_frames": 25
   },
   "memory": {
-    "max_rounds": 10,
-    "max_tokens": 512
+    "max_rounds": 5,
+    "max_tokens": 1024
   },
   "function_calling": {
     "enabled": true,
@@ -41,16 +43,16 @@
   },
   "react": {
     "enabled": true,
-    "max_steps": 5
+    "max_steps": 2
   },
   "reflection": {
-    "enabled": true,
+    "enabled": false,
     "model": "qwen2.5:0.5b"
   },
   "multi_agent": {
-    "enabled": true,
+    "enabled": false,
     "critic_model": "qwen2.5:0.5b",
-    "max_rounds": 2
+    "max_rounds": 1
   },
   "streaming_asr": {
     "enabled": true,
@@ -58,6 +60,10 @@
     "model": "",
     "min_chunk": 0.8,
     "chunk_intv": 0.5
+  },
+  "embedding": {
+    "backend": "onnx",
+    "model_dir": "models/embedding"
   },
   "skills": {
     "weather": { "enabled": true },

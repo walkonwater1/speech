@@ -10,6 +10,7 @@
 #include <sstream>
 #include <algorithm>
 #include <sys/stat.h>
+#include "logger.h"
 
 RAGSkill::RAGSkill(std::shared_ptr<EmbeddingEngine> embed_engine,
                    const std::string& docs_dir)
@@ -44,7 +45,7 @@ void RAGSkill::load_documents(const std::string& docs_dir)
     }
 
     if (all_chunks.empty()) {
-        std::cout << "   [RAG] 文档内容为空" << std::endl;
+        LOG_INFO("   [RAG] 文档内容为空");
         set_enabled(false);
         return;
     }

@@ -22,53 +22,8 @@
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
-
-// ── 辅助：float 样本 → WAV 文件（chunked 后端需要）─────
-
-static bool write_wav_float_file(const std::string& path,
-                                 const float* samples, int n,
-                                 int sample_rate = 16000)
-{
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f) return false;
-
-    std::vector<int16_t> int_samples(n);
-    for (int i = 0; i < n; ++i) {
-        float v = samples[i] * 32767.0f;
-        if (v > 32767.0f)  v = 32767.0f;
-        if (v < -32768.0f) v = -32768.0f;
-        int_samples[i] = (int16_t)v;
-    }
-
-    int byte_rate = sample_rate * 2;  // 16-bit mono
-    int data_size = n * 2;
-    int riff_size = 36 + data_size;
-
-    fwrite("RIFF", 1, 4, f);
-    fwrite(&riff_size, 4, 1, f);
-    fwrite("WAVE", 1, 4, f);
-
-    fwrite("fmt ", 1, 4, f);
-    int32_t fmt_size  = 16;
-    int16_t audio_fmt = 1;
-    int16_t num_ch    = 1;
-    int16_t bits      = 16;
-    fwrite(&fmt_size,  4, 1, f);
-    fwrite(&audio_fmt, 2, 1, f);
-    fwrite(&num_ch,    2, 1, f);
-    fwrite(&sample_rate, 4, 1, f);
-    fwrite(&byte_rate,   4, 1, f);
-    int16_t block_align = 2;
-    fwrite(&block_align, 2, 1, f);
-    fwrite(&bits,        2, 1, f);
-
-    fwrite("data", 1, 4, f);
-    fwrite(&data_size, 4, 1, f);
-    fwrite(int_samples.data(), 2, n, f);
-
-    fclose(f);
-    return true;
-}
+#include "logger.h"
+#include "wav_utils.h"
 
 // ── StreamingASR 构造/析构 ────────────────────────────
 
@@ -104,7 +59,7 @@ bool StreamingASR::initialize(const StreamingASRConfig& cfg)
             return true;
         }
         // 降级
-        std::cerr << "   ⚠️ online 后端不可用，降级到 chunked" << std::endl;
+        LOG_WARN("   ⚠️ online 后端不可用，降级到 chunked");
         cfg_.backend = "chunked";
     }
 
@@ -134,8 +89,8 @@ bool StreamingASR::init_online()
     if (!fexists(encoder) || !fexists(decoder) ||
         !fexists(joiner)  || !fexists(tokens)) {
         std::cerr << "   ❌ online 模型文件不全: " << cfg_.model_path << std::endl;
-        std::cerr << "   需要: encoder/decoder/joiner .onnx + tokens.txt" << std::endl;
-        std::cerr << "   下载: github.com/k2-fsa/sherpa-onnx/releases" << std::endl;
+        LOG_ERROR("   需要: encoder/decoder/joiner .onnx + tokens.txt");
+        LOG_ERROR("   下载: github.com/k2-fsa/sherpa-onnx/releases");
         return false;
     }
 
@@ -160,14 +115,14 @@ bool StreamingASR::init_online()
 
     online_rec_ = SherpaOnnxCreateOnlineRecognizer(&config);
     if (!online_rec_) {
-        std::cerr << "   ❌ 创建 online recognizer 失败" << std::endl;
+        LOG_ERROR("   ❌ 创建 online recognizer 失败");
         return false;
     }
 
-    std::cout << "   ✅ online 流式后端就绪 (transducer)" << std::endl;
+    LOG_INFO("   ✅ online 流式后端就绪 (transducer)");
     return true;
 #else
-    std::cerr << "   ❌ sherpa-onnx 未编译，online 后端不可用" << std::endl;
+    LOG_ERROR("   ❌ sherpa-onnx 未编译，online 后端不可用");
     return false;
 #endif
 }
@@ -176,7 +131,7 @@ bool StreamingASR::init_chunked()
 {
     auto* asr = new ASREngine(cfg_.model_path);
     if (!asr->initialize()) {
-        std::cerr << "   ❌ chunked 后端初始化失败" << std::endl;
+        LOG_ERROR("   ❌ chunked 后端初始化失败");
         delete asr;
         return false;
     }
@@ -209,7 +164,7 @@ void StreamingASR::start_utterance()
     if (online_rec_) {
         online_stream_ = SherpaOnnxCreateOnlineStream(online_rec_);
         if (!online_stream_) {
-            std::cerr << "   ⚠️ 创建 online stream 失败" << std::endl;
+            LOG_WARN("   ⚠️ 创建 online stream 失败");
         }
     }
 #endif
@@ -370,8 +325,7 @@ void StreamingASR::run_chunked_partial()
 
     // 写出临时 WAV
     const std::string wav = "temp_streaming_chunk.wav";
-    if (!write_wav_float_file(wav, audio_buf_.data(),
-                              (int)audio_buf_.size(), cfg_.sample_rate)) {
+    if (!wav_utils::write_wav_float(wav, audio_buf_, cfg_.sample_rate)) {
         return;
     }
 
@@ -402,8 +356,7 @@ std::string StreamingASR::run_chunked_final()
 
     // 写出完整的临时 WAV
     const std::string wav = "temp_streaming_final.wav";
-    if (!write_wav_float_file(wav, audio_buf_.data(),
-                              (int)audio_buf_.size(), cfg_.sample_rate)) {
+    if (!wav_utils::write_wav_float(wav, audio_buf_, cfg_.sample_rate)) {
         return "";
     }
 

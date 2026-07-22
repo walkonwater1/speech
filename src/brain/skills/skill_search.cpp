@@ -1,3 +1,4 @@
+#include "logger.h"
 /**
  * 网页搜索技能 — 实现
  *

@@ -79,6 +79,14 @@ public:
     /// 清空对话记忆
     void clear_memory();
 
+    /// 热重载配置（Layer 4.4）
+    /// Tier 1 字段立即生效，Tier 2/3 字段记录警告需重启
+    void reload_config(const PipelineConfig& new_cfg);
+
+    /// 设置/获取配置文件路径（供 SIGHUP 回调使用）
+    void set_config_path(const std::string& path) { config_path_ = path; }
+    const std::string& config_path() const { return config_path_; }
+
     // ── 交互模式（可打断）─────────────────────────
 
     /// 启动持续监听 + 语音打断模式（阻塞当前线程直到用户中断）
@@ -89,6 +97,7 @@ public:
 
 private:
     PipelineConfig cfg_;
+    std::string config_path_;  // 配置文件路径（Layer 4.4 热重载）
 
     ASREngine         asr_;
     LLMEngine         llm_;
@@ -117,6 +126,7 @@ private:
 
     std::atomic<bool> interactive_running_{false};
     std::atomic<bool> is_playing_{false};
+    std::atomic<bool> process_busy_{false};   // 处理中（含推理+TTS），capture 线程暂停收集新段
     std::atomic<pid_t> player_pid_{-1};
     std::atomic<int>   generation_{0};      // 每次新语音段 +1，推理线程检查是否过期
 
@@ -138,9 +148,4 @@ private:
 
     void capture_loop();
     void process_loop();
-
-    /// 将 float 样本写入 WAV 文件
-    static bool write_wav_float(const std::string& path,
-                                const std::vector<float>& samples,
-                                int sample_rate = 16000);
 };

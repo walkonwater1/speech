@@ -42,9 +42,11 @@ struct PipelineConfig {
     std::string vad_backend          = "energy";   // "energy" 或 "adaptive"
     float vad_energy_threshold   = 0.003f;   // RMS 阈值，越大越不敏感（仅 energy 模式）
     int   vad_min_speech_frames  = 8;        // 最小语音帧数 (~160ms)
-    int   vad_min_silence_frames = 30;       // 静音多少帧后判结束 (~600ms)
+    int   vad_min_silence_frames = 20;       // 静音多少帧后判结束 (~400ms)
     int   vad_pre_speech_frames  = 15;       // 语音开始前保留帧数 (~300ms)
     float vad_adaptive_factor    = 3.0f;     // 阈值 = 噪声基线 × factor（仅 adaptive 模式）
+    float vad_min_energy         = 0.002f;   // 绝对最小能量阈值（仅 adaptive 模式）
+    int   vad_cooldown_frames    = 25;       // 语音段结束后强制静音帧数 (~500ms)
 
     // ── 对话记忆 ───────────────────────────────────
     int max_rounds = 10;
@@ -80,6 +82,10 @@ struct PipelineConfig {
     std::string streaming_asr_model  = "";          // online 模型路径（空=复用 asr_model_path）
     float  streaming_min_chunk  = 0.8f;             // chunked: 最小触发长度 (秒)
     float  streaming_chunk_intv = 0.5f;             // chunked: 部分识别间隔 (秒)
+
+    // ── Embedding (Layer 4.2) ──────────────────────────
+    std::string embedding_backend   = "ollama";     // "ollama" | "onnx"
+    std::string embedding_model_dir = "models/embedding";  // ONNX 模型目录
 
     // ── 文件加载 ───────────────────────────────────
 

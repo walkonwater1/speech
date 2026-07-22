@@ -27,8 +27,12 @@ struct VADConfig {
     int   frame_size_samples = 320;      // 每帧采样数 (20ms @16kHz)
 
     // AdaptiveVAD 专用
-    float adaptive_factor   = 3.0f;      // 阈值 = 噪声基线 × factor
-    float noise_update_rate = 0.02f;     // 噪声基线 EMA 更新速率
+    float adaptive_factor      = 3.0f;   // 阈值 = 噪声基线 × factor
+    float noise_update_rate    = 0.02f;  // 噪声基线 EMA 更新速率
+    float min_energy_threshold = 0.002f; // 绝对最小能量阈值，低于此值永不为语音
+
+    // 语音段结束后强制静音帧数（防止回声/残响被误识别为新语音）
+    int silence_cooldown_frames = 25;    // 500ms @20ms/frame
 
     // 安全限制
     int max_speech_samples = 480000;     // 硬上限 30s@16kHz，防止 OOM
@@ -65,9 +69,10 @@ protected:
     VADConfig cfg_;
     VADState state_ = VADState::SILENCE;
 
-    int speech_frames_  = 0;
-    int silence_frames_ = 0;
-    bool segment_ready_ = false;
+    int speech_frames_   = 0;
+    int silence_frames_  = 0;
+    int cooldown_remaining_ = 0;  // 语音段结束后的强制静音帧数
+    bool segment_ready_  = false;
 
     std::vector<float> speech_buffer_;
     std::vector<float> pre_buffer_;

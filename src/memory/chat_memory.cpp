@@ -1,3 +1,4 @@
+#include "logger.h"
 /**
  * 对话记忆管理 — Token 感知 + O(1) 截断
  */
@@ -44,6 +45,13 @@ void ChatMemory::clear()
 {
     history_.clear();
     total_tokens_ = 0;
+}
+
+void ChatMemory::set_limits(int max_rounds, int max_tokens)
+{
+    max_rounds_ = max_rounds;
+    max_tokens_ = max_tokens;
+    trim();
 }
 
 void ChatMemory::pop_front()
