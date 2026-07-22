@@ -29,14 +29,13 @@ std::string TimeSkill::execute(const std::string& /*text*/)
 
     char buf[128];
     std::snprintf(buf, sizeof(buf),
-        "现在是 %d年%d月%d日 %s %02d:%02d:%02d",
+        "现在是 %d年%d月%d日 %s %02d:%02d",
         local->tm_year + 1900,
         local->tm_mon + 1,
         local->tm_mday,
         weekdays[local->tm_wday],
         local->tm_hour,
-        local->tm_min,
-        local->tm_sec);
+        local->tm_min);
 
     std::cout << "   [Skill:时间] " << buf << std::endl;
     return std::string(buf);
