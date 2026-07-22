@@ -13,6 +13,8 @@
 #include "skills/skill_weather.h"
 #include "skills/skill_time.h"
 #include "skills/skill_search.h"
+#include "skills/skill_rag.h"
+#include "embedding_engine.h"
 
 #include <sstream>
 #include <iostream>
@@ -31,6 +33,14 @@ SkillManager::SkillManager()
 void SkillManager::add_skill(std::unique_ptr<Skill> skill)
 {
     skills_.push_back(std::move(skill));
+}
+
+void SkillManager::register_rag(std::shared_ptr<EmbeddingEngine> embed,
+                                const std::string& docs_dir)
+{
+    auto rag = std::make_unique<RAGSkill>(embed, docs_dir);
+    // 默认启用状态由 config 决定，这里先添加，外部再 set_enabled
+    add_skill(std::move(rag));
 }
 
 void SkillManager::set_enabled(const std::string& name, bool enabled)

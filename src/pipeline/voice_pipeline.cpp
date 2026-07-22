@@ -62,13 +62,22 @@ bool VoicePipeline::initialize()
         return false;
     }
 
-    std::cout << "[4/4] Ollama: " << cfg_.llm_model
+    // ── 初始化 EmbeddingEngine + RAG ──────────────────
+    if (cfg_.skill_rag) {
+        std::cout << "[Embedding] 初始化 (Ollama /api/embed) ..." << std::endl;
+        embed_ = std::make_shared<EmbeddingEngine>(cfg_.ollama_host, cfg_.llm_model);
+        skill_mgr_.register_rag(embed_, cfg_.rag_docs_dir);
+        skill_mgr_.set_enabled("rag", true);
+    }
+
+    std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
     std::cout << "   特性: ";
     if (kws_.enabled()) std::cout << "唤醒词=\"" << cfg_.wake_word << "\" ";
     std::cout << "声纹(阈值=" << cfg_.sv_threshold << ") ";
     std::cout << "记忆(最近" << cfg_.max_rounds << "轮)";
+    if (cfg_.skill_rag) std::cout << " RAG(" << cfg_.rag_docs_dir << ")";
     std::cout << std::endl;
 
     std::cout << "   " << speaker_.status_text() << std::endl;

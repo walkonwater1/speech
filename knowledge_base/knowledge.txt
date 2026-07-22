@@ -1,0 +1,41 @@
+小千语音助手 — 产品介绍
+
+小千是一个基于 C++ 构建的本地语音交互助手，具备完整的 ASR → LLM → TTS 流水线。
+
+## 支持的技能
+
+1. 天气查询: 可以查询全国主要城市的天气，使用 wttr.in 免费 API。
+2. 时间查询: 可以告诉你当前的日期、时间和星期。
+3. RAG 检索: 可以从知识库中搜索相关信息回答你的问题。
+
+## 使用方式
+
+- 输入文字: 直接和 LLM 文字对话
+- 输入 r: 单次录音模式，录音 → 识别 → 回复
+- 输入 listen: 交互模式，持续监听 + 语音打断
+- 输入 enroll: 注册你的声纹
+- 输入 clear: 清空对话记忆
+- 输入 quit: 退出程序
+
+## 技术架构
+
+- ASR: SenseVoice Small 模型 (sherpa-onnx)
+- LLM: Ollama 调用 Qwen2.5 系列模型
+- TTS: Piper 神经网络语音合成 (花颜音色)
+- VAD: 自适应能量检测，支持语音打断
+- 声纹: CAM++ 说话人验证
+
+## 配置说明
+
+配置文件位于项目根目录 config.json，可以修改:
+- llm.model: LLM 模型名称 (qwen2.5:0.5b / qwen2.5:3b / qwen2.5:7b)
+- tts.backend: TTS 后端 (piper / espeak)
+- vad.backend: VAD 模式 (energy / adaptive)
+- skills: 启用/禁用各技能
+
+## 部署要求
+
+- 操作系统: Linux (Ubuntu 20.04+)
+- 内存: 至少 4GB
+- 无需 GPU，纯 CPU 运行
+- 需要安装: arecord/aplay (ALSA), libcurl, nlohmann-json, espeak-ng, conda (Piper TTS 需要)

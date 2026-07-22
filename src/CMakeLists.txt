@@ -30,13 +30,20 @@ set(SOURCES
     speech/wake_word.cpp
     speech/speaker_verifier.cpp
 
-    brain/llm_engine.cpp
-    brain/chat_memory.cpp
     brain/skill_manager.cpp
 
     brain/skills/skill_weather.cpp
     brain/skills/skill_time.cpp
     brain/skills/skill_search.cpp
+    brain/skills/skill_rag.cpp
+
+    llm/llm_engine.cpp
+    llm/prompt_builder.cpp
+    llm/token_counter.cpp
+    llm/embedding_engine.cpp
+
+    memory/chat_memory.cpp
+    memory/document_chunker.cpp
 
     audio/audio_io.cpp
     audio/vad.cpp
@@ -52,8 +59,6 @@ set(HEADERS
     speech/speaker_verifier.h
     speech/espeak_min.h
 
-    brain/llm_engine.h
-    brain/chat_memory.h
     brain/skill_base.h
     brain/skill_utils.h
     brain/skill_manager.h
@@ -61,9 +66,20 @@ set(HEADERS
     brain/skills/skill_weather.h
     brain/skills/skill_time.h
     brain/skills/skill_search.h
+    brain/skills/skill_rag.h
+
+    llm/llm_engine.h
+    llm/prompt_builder.h
+    llm/token_counter.h
+    llm/embedding_engine.h
+
+    memory/chat_memory.h
+    memory/vector_store.h
+    memory/document_chunker.h
 
     audio/audio_io.h
     audio/vad.h
+    audio/denoiser.h
 )
 
 # ── 可执行文件 ────────────────────────────────────────
@@ -73,7 +89,11 @@ target_include_directories(voice_pipeline PRIVATE
     ${CMAKE_SOURCE_DIR}/pipeline
     ${CMAKE_SOURCE_DIR}/speech
     ${CMAKE_SOURCE_DIR}/brain
+    ${CMAKE_SOURCE_DIR}/brain/skills
+    ${CMAKE_SOURCE_DIR}/llm
+    ${CMAKE_SOURCE_DIR}/memory
     ${CMAKE_SOURCE_DIR}/audio
+    ${CMAKE_SOURCE_DIR}/utils
     ${CURL_INCLUDE_DIRS}
 )
 

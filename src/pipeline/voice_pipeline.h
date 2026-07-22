@@ -44,6 +44,7 @@
 #include "audio_io.h"
 #include "vad.h"
 #include "skill_manager.h"
+#include "embedding_engine.h"
 
 class VoicePipeline {
 public:
@@ -85,6 +86,7 @@ private:
     ChatMemory        memory_;
     SkillManager      skill_mgr_;
     AudioRecorder     recorder_;
+    std::shared_ptr<EmbeddingEngine> embed_;  // RAG 共用
 
     bool initialized_ = false;
 

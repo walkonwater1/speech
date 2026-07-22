@@ -16,6 +16,7 @@
 #include <iostream>
 #include <sstream>
 #include <chrono>
+#include <ctime>
 
 using json = nlohmann::json;
 
@@ -103,8 +104,9 @@ LLMEngine::LLMEngine(const std::string& host,
                      const std::string& system_prompt)
     : host_(host)
     , model_(model)
-    , system_prompt_(system_prompt)
-{}
+{
+    builder_.set_system(system_prompt);
+}
 
 std::string LLMEngine::chat(const std::string& user_message,
                             const std::string& history_context,
@@ -112,25 +114,22 @@ std::string LLMEngine::chat(const std::string& user_message,
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    // 拼接 prompt: [额外上下文] + [历史] + [当前用户消息]
-    std::string prompt;
-    if (!extra_context.empty()) {
-        prompt += "[系统信息]\n" + extra_context + "\n\n";
+    // 注入动态变量（每次对话前更新）
+    {
+        std::time_t now = std::time(nullptr);
+        char time_buf[32];
+        std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M", std::localtime(&now));
+        builder_.set("time", time_buf);
     }
-    prompt += "[用户消息]\n" + user_message;
 
-    if (!history_context.empty()) {
-        prompt = history_context + "\nUser: " + prompt + "\nAssistant:";
-    }
+    // 使用 PromptBuilder 组装 messages
+    json messages = builder_.build_messages(user_message, history_context, extra_context);
 
     // 构造 JSON 请求体
     json body;
     body["model"] = model_;
     body["stream"] = false;
-    body["messages"] = json::array({
-        {{"role", "system"}, {"content", system_prompt_}},
-        {{"role", "user"},   {"content", prompt}}
-    });
+    body["messages"] = messages;
 
     std::string request_json = body.dump();
 

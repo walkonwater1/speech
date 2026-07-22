@@ -5,8 +5,8 @@
  */
 
 #include "skill_search.h"
-#include "../skill_utils.h"
-#include "../../utils/http_client.h"
+#include "skill_utils.h"
+#include "http_client.h"
 #include <sstream>
 #include <iostream>
 #include <cstdio>

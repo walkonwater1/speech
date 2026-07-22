@@ -21,6 +21,9 @@
 #include <memory>
 #include <ctime>
 
+// 前向声明
+class EmbeddingEngine;
+
 // ── 技能管理器 ────────────────────────────────────────
 
 class SkillManager {
@@ -29,6 +32,10 @@ public:
 
     /// 添加技能（接管所有权）
     void add_skill(std::unique_ptr<Skill> skill);
+
+    /// 注册 RAG 技能（需要 EmbeddingEngine，独立方法）
+    void register_rag(std::shared_ptr<EmbeddingEngine> embed,
+                      const std::string& docs_dir = "knowledge_base");
 
     /// 启用/禁用某个技能
     void set_enabled(const std::string& name, bool enabled);

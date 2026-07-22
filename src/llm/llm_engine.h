@@ -10,11 +10,15 @@
  */
 
 #include <string>
+#include "prompt_builder.h"
 
 class LLMEngine {
 public:
     LLMEngine(const std::string& host, const std::string& model,
               const std::string& system_prompt);
+
+    /// 获取 PromptBuilder（用于注入动态变量，如当前时间）
+    PromptBuilder& builder() { return builder_; }
 
     /// 发消息给 LLM，获取回复
     /// @param user_message     当前用户消息
@@ -28,7 +32,7 @@ public:
 private:
     std::string host_;           // Ollama 服务地址
     std::string model_;          // 模型名
-    std::string system_prompt_;
+    PromptBuilder builder_;      // prompt 模板引擎
 
     /// HTTP POST → Ollama /api/chat → 解析 JSON 回复
     std::string http_post(const std::string& request_json);

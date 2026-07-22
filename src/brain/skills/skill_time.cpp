@@ -3,7 +3,7 @@
  */
 
 #include "skill_time.h"
-#include "../skill_utils.h"
+#include "skill_utils.h"
 #include <ctime>
 #include <cstdio>
 #include <iostream>

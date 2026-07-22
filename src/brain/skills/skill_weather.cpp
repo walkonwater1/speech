@@ -5,8 +5,8 @@
  */
 
 #include "skill_weather.h"
-#include "../skill_utils.h"
-#include "../../utils/http_client.h"
+#include "skill_utils.h"
+#include "http_client.h"
 #include <iostream>
 
 bool WeatherSkill::match(const std::string& text)

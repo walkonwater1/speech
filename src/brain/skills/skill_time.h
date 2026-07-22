@@ -3,7 +3,7 @@
  * 时间/日期查询技能 — 本地 localtime 计算
  */
 
-#include "../skill_base.h"
+#include "skill_base.h"
 
 class TimeSkill : public Skill {
 public:

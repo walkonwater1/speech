@@ -3,7 +3,7 @@
  * 天气查询技能 — 通过 wttr.in API（免费，无需注册）
  */
 
-#include "../skill_base.h"
+#include "skill_base.h"
 
 class WeatherSkill : public Skill {
 public:

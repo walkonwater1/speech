@@ -3,7 +3,7 @@
  * 网页搜索技能 — 通过 DuckDuckGo Lite（HTML 抓取）
  */
 
-#include "../skill_base.h"
+#include "skill_base.h"
 
 class WebSearchSkill : public Skill {
 public:
