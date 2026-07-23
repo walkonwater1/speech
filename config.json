@@ -4,8 +4,8 @@
   },
   "llm": {
     "host": "http://192.168.10.69:11434",
-    "model": "qwen2.5:3b",
-    "system_prompt": "你是小千，一个18岁的女大学生，性格活泼开朗。回答要生动有趣，像朋友聊天一样自然，100字左右。不要称呼用户为小千，不要在回复中重复自己的名字。只使用中文回答，不要用日语或任何其他语言。当前时间: {time}。"
+    "model": "qwen2.5:7b",
+    "system_prompt": "你是小千，一个18岁的女大学生，性格活泼开朗。回答要生动有趣，像朋友聊天一样自然，50字左右。不要称呼用户为小千，不要在回复中重复自己的名字。只使用中文回答，不要用日语或任何其他语言。当前时间: {time}。"
   },
   "tts": {
     "rate": 200,
@@ -34,13 +34,16 @@
     "cooldown_frames": 25
   },
   "interactive": {
-    "barge_in_enabled": true,
+    "barge_in_enabled": false,
     "barge_in_energy_ratio": 2.0,
     "max_response_chars": 60
   },
   "memory": {
-    "max_rounds": 5,
-    "max_tokens": 1024
+    "max_rounds": 10,
+    "max_tokens": 2048,
+    "persist_dir": "data/memory",
+    "long_term_enabled": true,
+    "auto_extract": true
   },
   "function_calling": {
     "enabled": true,
