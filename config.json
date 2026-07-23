@@ -25,12 +25,12 @@
   },
   "vad": {
     "backend": "adaptive",
-    "energy_threshold": 0.003,
-    "min_speech_frames": 8,
+    "energy_threshold": 0.005,
+    "min_speech_frames": 12,
     "min_silence_frames": 20,
     "pre_speech_frames": 15,
-    "adaptive_factor": 3.0,
-    "min_energy": 0.006,
+    "adaptive_factor": 5.0,
+    "min_energy": 0.015,
     "cooldown_frames": 25
   },
   "interactive": {

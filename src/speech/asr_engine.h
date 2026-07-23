@@ -29,8 +29,13 @@ public:
     /// @return 识别文本，失败返回空字符串
     std::string transcribe(const std::string& wav_path);
 
+    /// 静默模式：不打印 [ASR] 日志（流式 ASR 部分识别时使用）
+    void set_quiet(bool q) { quiet_ = q; }
+    bool quiet() const { return quiet_; }
+
 private:
     std::string model_path_;
     const SherpaOnnxOfflineRecognizer* recognizer_ = nullptr;  // C API opaque pointer
     bool initialized_ = false;
+    bool quiet_ = false;
 };

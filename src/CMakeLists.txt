@@ -50,6 +50,11 @@ set(SOURCES
     brain/skills/skill_search.cpp
     brain/skills/skill_rag.cpp
     brain/skills/skill_memory.cpp
+    brain/skills/skill_reminder.cpp
+    brain/skills/skill_system.cpp
+    brain/skills/skill_notes.cpp
+    brain/skills/skill_calculator.cpp
+    brain/skills/skill_entertainment.cpp
 
     llm/llm_engine.cpp
     llm/prompt_builder.cpp
@@ -92,6 +97,11 @@ set(HEADERS
     brain/skills/skill_search.h
     brain/skills/skill_rag.h
     brain/skills/skill_memory.h
+    brain/skills/skill_reminder.h
+    brain/skills/skill_system.h
+    brain/skills/skill_notes.h
+    brain/skills/skill_calculator.h
+    brain/skills/skill_entertainment.h
 
     llm/llm_engine.h
     llm/prompt_builder.h

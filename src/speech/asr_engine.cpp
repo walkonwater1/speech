@@ -141,7 +141,9 @@ std::string ASREngine::transcribe(const std::string& wav_path)
 
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
-    std::cout << "   [ASR] \"" << text << "\"  (" << elapsed / 1000.0 << "s)" << std::endl;
+    if (!quiet_) {
+        std::cout << "   [ASR] \"" << text << "\"  (" << elapsed / 1000.0 << "s)" << std::endl;
+    }
 
     return text;
 }

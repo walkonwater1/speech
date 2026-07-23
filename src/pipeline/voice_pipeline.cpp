@@ -230,8 +230,23 @@ std::string VoicePipeline::process_text(const std::string& text)
 
     std::string reply;
 
-    // ── 策略 1: ReAct 多步推理（如果启用）─────────────
-    if (react_) {
+    // ── 策略 0: 关键字技能匹配（最优先，不依赖LLM）─────
+    //     先让关键字 match 抢答（计算/系统/笔记/提醒/笑话等）
+    //     这些确定性任务不需要 LLM 理解，关键字就够了
+    SkillResult sr = skill_mgr_.detect_and_execute(text);
+    std::string extra = SkillManager::get_system_context();
+    bool skill_hit = sr.hit;
+    if (skill_hit) {
+        extra += "\n" + sr.result_text;
+        std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+    }
+
+    // 注入用户长期记忆
+    extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
+    // ── 策略 1: ReAct 多步推理（skill 未命中时才用）───
+    //     复杂多步任务（如"查天气然后提醒我"）需要 ReAct
+    if (react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
@@ -239,29 +254,19 @@ std::string VoicePipeline::process_text(const std::string& text)
             };
 
             std::string ctx = memory_.get_context();
-            auto result = react_->run(text, tools, exec_fn, ctx, cfg_.react_max_steps);
+            std::string react_ctx = ctx.empty() ? extra : ctx + "\n" + extra;
+            auto result = react_->run(text, tools, exec_fn, react_ctx, cfg_.react_max_steps);
 
             if (result.success && !result.final_answer.empty()) {
                 reply = result.final_answer;
-                // 不在此处返回，继续到下方 reflection + memory
             } else if (!result.success) {
                 LOG_INFO("   [ReAct] 推理失败，降级到单步模式");
             }
         }
     }
 
-    // ── 策略 2: Function Calling + LLM（降级方案）─────
+    // ── 策略 2: 直接 LLM 回复（skill命中/ReAct失败时）─
     if (reply.empty()) {
-        SkillResult sr = skill_mgr_.detect_and_execute(text);
-        std::string extra = SkillManager::get_system_context();
-        if (sr.hit) {
-            extra += "\n" + sr.result_text;
-            std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
-        }
-
-        // 注入用户长期记忆
-        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
-
         std::string context = memory_.get_context();
         reply = llm_.chat(text, context, extra);
     }
@@ -301,8 +306,20 @@ std::string VoicePipeline::process_text_for_ws(const std::string& text,
 
     std::string reply;
 
-    // ── 策略 1: ReAct 多步推理（如果启用）─────────────
-    if (react_) {
+    // ── 策略 0: 关键字技能匹配（最优先）───────────────
+    SkillResult sr = skill_mgr_.detect_and_execute(text);
+    std::string extra = SkillManager::get_system_context();
+    bool skill_hit = sr.hit;
+    if (skill_hit) {
+        extra += "\n" + sr.result_text;
+        std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+    }
+
+    // 注入用户长期记忆
+    extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
+    // ── 策略 1: ReAct 多步推理（skill 未命中时才用）───
+    if (react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
@@ -310,7 +327,8 @@ std::string VoicePipeline::process_text_for_ws(const std::string& text,
             };
 
             std::string ctx = memory_.get_context();
-            auto result = react_->run(text, tools, exec_fn, ctx, cfg_.react_max_steps);
+            std::string react_ctx = ctx.empty() ? extra : ctx + "\n" + extra;
+            auto result = react_->run(text, tools, exec_fn, react_ctx, cfg_.react_max_steps);
 
             if (result.success && !result.final_answer.empty()) {
                 reply = result.final_answer;
@@ -320,17 +338,8 @@ std::string VoicePipeline::process_text_for_ws(const std::string& text,
         }
     }
 
-    // ── 策略 2: Function Calling + LLM（降级方案）─────
+    // ── 策略 2: 直接 LLM 回复 ───────────────────────
     if (reply.empty()) {
-        SkillResult sr = skill_mgr_.detect_and_execute(text);
-        std::string extra = SkillManager::get_system_context();
-        if (sr.hit) {
-            extra += "\n" + sr.result_text;
-            std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
-        }
-
-        // 注入用户长期记忆
-        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
 
         std::string context = memory_.get_context();
         reply = llm_.chat(text, context, extra);
@@ -435,8 +444,20 @@ std::string VoicePipeline::process_voice()
 
     std::string reply;
 
-    // ── ReAct 多步推理（优先）─────────────────────────
-    if (react_) {
+    // ── 策略 0: 关键字技能匹配（最优先）───────────────
+    SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+    std::string extra = SkillManager::get_system_context();
+    bool skill_hit = sr.hit;
+    if (skill_hit) {
+        extra += "\n" + sr.result_text;
+        std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+    }
+
+    // 注入用户长期记忆
+    extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
+    // ── 策略 1: ReAct 多步推理（skill 未命中时才用）───
+    if (react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
@@ -444,7 +465,8 @@ std::string VoicePipeline::process_voice()
             };
 
             std::string ctx = memory_.get_context();
-            auto result = react_->run(prompt, tools, exec_fn, ctx, cfg_.react_max_steps);
+            std::string react_ctx = ctx.empty() ? extra : ctx + "\n" + extra;
+            auto result = react_->run(prompt, tools, exec_fn, react_ctx, cfg_.react_max_steps);
 
             if (result.success && !result.final_answer.empty()) {
                 reply = result.final_answer;
@@ -452,18 +474,8 @@ std::string VoicePipeline::process_voice()
         }
     }
 
-    // ── 降级：Function Calling → 关键字匹配 ─────────
+    // ── 降级：直接 LLM 回复 ─────────────────────────
     if (reply.empty()) {
-        SkillResult sr = skill_mgr_.detect_and_execute(prompt);
-        std::string extra = SkillManager::get_system_context();
-        if (sr.hit) {
-            extra += "\n" + sr.result_text;
-            std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
-        }
-
-        // 注入用户长期记忆
-        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
-
         std::string context = memory_.get_context();
         reply = llm_.chat(prompt, context, extra);
     }
@@ -504,29 +516,35 @@ std::string VoicePipeline::process_voice_file(const std::string& wav_path)
 
     std::string reply;
 
-    if (react_) {
+    // ── 策略 0: 关键字技能匹配（最优先）───────────────
+    SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+    std::string extra = SkillManager::get_system_context();
+    bool skill_hit = sr.hit;
+    if (skill_hit) {
+        extra += "\n" + sr.result_text;
+        std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+    }
+
+    extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
+    // ── 策略 1: ReAct（skill 未命中时才用）───────────
+    if (react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
                 return skill_mgr_.execute_tool(name, args, "");
             };
             std::string ctx = memory_.get_context();
-            auto result = react_->run(prompt, tools, exec_fn, ctx, cfg_.react_max_steps);
+            std::string react_ctx = ctx.empty() ? extra : ctx + "\n" + extra;
+            auto result = react_->run(prompt, tools, exec_fn, react_ctx, cfg_.react_max_steps);
             if (result.success && !result.final_answer.empty()) {
                 reply = result.final_answer;
             }
         }
     }
 
+    // ── 策略 2: 直接 LLM 回复 ───────────────────────
     if (reply.empty()) {
-        SkillResult sr = skill_mgr_.detect_and_execute(prompt);
-        std::string extra = SkillManager::get_system_context();
-        if (sr.hit) {
-            extra += "\n" + sr.result_text;
-        }
-        // 注入用户长期记忆
-        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
-
         std::string context = memory_.get_context();
         reply = llm_.chat(prompt, context, extra);
     }
@@ -1274,37 +1292,44 @@ void VoicePipeline::process_loop()
             }
         }
 
-        // 4) 推理（ReAct → Function Calling → 关键字匹配）
+        // 4) 推理：关键字技能 → ReAct → 直接 LLM
         // 获取活跃用户的 system prompt（声纹识别出的用户）
         std::string speaker_prompt = voiceprint_.active_system_prompt();
         std::string context = memory_.get_context();
         std::string reply;
 
-        if (react_) {
+        // ── 策略 0: 关键字技能匹配（最优先）───────────
+        SkillResult sr = skill_mgr_.detect_and_execute(prompt);
+        std::string extra = SkillManager::get_system_context();
+        if (!speaker_prompt.empty()) {
+            extra = speaker_prompt + "\n" + extra;
+        }
+        bool skill_hit = sr.hit;
+        if (skill_hit) {
+            extra += "\n" + sr.result_text;
+            std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+        }
+
+        // 注入用户长期记忆
+        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
+        // ── 策略 1: ReAct 多步推理（skill 未命中时才用）─
+        if (react_ && !skill_hit) {
             auto tools = skill_mgr_.collect_function_defs();
             if (!tools.empty()) {
                 auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
                     return skill_mgr_.execute_tool(name, args, "");
                 };
-                auto result = react_->run(prompt, tools, exec_fn, context, cfg_.react_max_steps);
+                std::string react_ctx = context.empty() ? extra : context + "\n" + extra;
+                auto result = react_->run(prompt, tools, exec_fn, react_ctx, cfg_.react_max_steps);
                 if (result.success && !result.final_answer.empty()) {
                     reply = result.final_answer;
                 }
             }
         }
 
+        // ── 策略 2: 直接 LLM 回复 ───────────────────
         if (reply.empty()) {
-            SkillResult sr = skill_mgr_.detect_and_execute(prompt);
-            std::string extra = SkillManager::get_system_context();
-            if (!speaker_prompt.empty()) {
-                extra = speaker_prompt + "\n" + extra;
-            }
-            if (sr.hit) {
-                extra += "\n" + sr.result_text;
-                std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
-            }
-            // 注入用户长期记忆
-            extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
             reply = llm_.chat(prompt, context, extra);
         }
 

@@ -15,6 +15,11 @@
 #include "skills/skill_time.h"
 #include "skills/skill_search.h"
 #include "skills/skill_rag.h"
+#include "skills/skill_reminder.h"
+#include "skills/skill_system.h"
+#include "skills/skill_notes.h"
+#include "skills/skill_calculator.h"
+#include "skills/skill_entertainment.h"
 #include "function_caller.h"
 #include "embedding_engine.h"
 
@@ -30,6 +35,11 @@ SkillManager::SkillManager()
     add_skill(std::make_unique<WeatherSkill>());
     add_skill(std::make_unique<TimeSkill>());
     add_skill(std::make_unique<WebSearchSkill>());
+    add_skill(std::make_unique<ReminderSkill>());
+    add_skill(std::make_unique<SystemSkill>());
+    add_skill(std::make_unique<NotesSkill>());
+    add_skill(std::make_unique<CalculatorSkill>());
+    add_skill(std::make_unique<EntertainmentSkill>());
 }
 
 void SkillManager::add_skill(std::unique_ptr<Skill> skill)

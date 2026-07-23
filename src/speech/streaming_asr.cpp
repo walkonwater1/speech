@@ -138,6 +138,8 @@ bool StreamingASR::init_chunked()
     }
 
     chunked_engine_ = asr;
+    // 流式部分识别不需要打印 [ASR]，最终结果才打印（由调用方控制）
+    asr->set_quiet(true);
     audio_buf_.reserve(cfg_.sample_rate * 30);  // 预分配 30 秒
     std::cout << "   ✅ chunked 流式后端就绪 "
               << "(最小" << cfg_.min_chunk_seconds << "秒触发, "
