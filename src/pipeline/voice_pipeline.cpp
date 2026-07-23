@@ -17,6 +17,7 @@
 #include "voice_pipeline.h"
 #include "denoiser.h"
 #include "wav_utils.h"
+#include "utf8_utils.h"
 #include "skill_memory.h"
 
 #include <iostream>
@@ -951,6 +952,13 @@ void VoicePipeline::capture_loop()
     int   echo_frames    = 0;         // 基线学习帧数
     int   barge_in_frames = 0;        // 连续高于基线的帧数
 
+    // ── ASR 文本稳定性端点检测 ──────────────────
+    // VAD 静音不可靠时，用 ASR 部分结果是否稳定来判断"说完了"
+    //   - 文本以 。！？结尾 + 稳定 0.8s → 触发端点
+    //   - 文本稳定 1.5s → 触发端点
+    std::string asr_last_partial;     // 上一帧的部分识别文本
+    int   asr_stable_frames  = 0;    // 文本连续不变的帧数
+
     std::cout << "🎙️  麦克风已开启，开始监听... (VAD: " << cfg_.vad_backend << ")" << std::endl;
 
     while (interactive_running_) {
@@ -978,6 +986,8 @@ void VoicePipeline::capture_loop()
             if (stream_asr_.initialized()) {
                 stream_asr_.cancel();
             }
+            asr_last_partial.clear();
+            asr_stable_frames = 0;
         }
         was_playing = playing;
 
@@ -988,13 +998,51 @@ void VoicePipeline::capture_loop()
         VADState vad_state = vad->process_frame(float_buf.data(), frame_samples);
         bool in_speech = vad->in_speech();
 
-        // ── 流式 ASR：仅当 process 空闲时喂帧 ────────────
+        // ── 流式 ASR：始终喂帧（即使在推理中也持续识别）────
         bool busy = process_busy_.load();
-        if (stream_asr_.initialized() && in_speech && !busy) {
+        if (stream_asr_.initialized() && in_speech) {
             if (vad_state == VADState::SPEECH_START) {
                 stream_asr_.start_utterance();
+                asr_last_partial.clear();
+                asr_stable_frames = 0;
             }
             stream_asr_.feed(float_buf.data(), frame_samples);
+
+            // ── ASR 文本稳定性端点检测 ──────────────────
+            // 当 ASR 部分结果连续稳定（不变）一段时间，认为语义完成
+            // 不再依赖 VAD 检测到静音，解决"一直说话/噪声时 VAD 不休"的问题
+            const char* p = stream_asr_.partial();
+            std::string cur_partial = (p && p[0]) ? std::string(p) : "";
+            if (!cur_partial.empty() && cur_partial == asr_last_partial) {
+                asr_stable_frames++;
+            } else if (!cur_partial.empty()) {
+                asr_stable_frames = 0;
+                asr_last_partial = cur_partial;
+            }
+        }
+
+        // ── ASR 端点触发（与 VAD 互补）──────────────────
+        bool asr_endpoint = false;
+        if (!asr_last_partial.empty() && asr_stable_frames > 0) {
+            // 检查是否以句尾标点结尾: 。！？
+            bool ends_with_period = false;
+            size_t len = asr_last_partial.size();
+            if (len >= 3) {
+                unsigned char b0 = static_cast<unsigned char>(asr_last_partial[len-3]);
+                unsigned char b1 = static_cast<unsigned char>(asr_last_partial[len-2]);
+                unsigned char b2 = static_cast<unsigned char>(asr_last_partial[len-1]);
+                // 。U+3002: E3 80 82
+                if (b0 == 0xE3 && b1 == 0x80 && b2 == 0x82) ends_with_period = true;
+                // ！U+FF01: EF BC 81
+                if (b0 == 0xEF && b1 == 0xBC && b2 == 0x81) ends_with_period = true;
+                // ？U+FF1F: EF BC 9F
+                if (b0 == 0xEF && b1 == 0xBC && b2 == 0x9F) ends_with_period = true;
+            }
+            // 句尾标点 → 0.8s；普通稳定 → 1.5s
+            int threshold = ends_with_period ? 40 : 75;
+            if (asr_stable_frames >= threshold) {
+                asr_endpoint = true;
+            }
         }
 
         // ── 安全阀：最大语音时长 10 秒 ──────────────────
@@ -1051,8 +1099,13 @@ void VoicePipeline::capture_loop()
             echo_frames = 0;
         }
 
-        // 语音段结束 → 入队（仅当 process 空闲时）
-        if ((vad->segment_ready() || speech_timeout) && !busy) {
+        // 语音段结束 → 入队（推理中也允许收集，但播放中除外以防止回声误触发）
+        // 三种触发条件: VAD静音 / ASR文本稳定(语义完成) / 10s安全超时
+        bool asr_trigger = asr_endpoint && vad->speech_sample_count() > 24000; // 至少1.5s语音
+        if (asr_trigger && !vad->segment_ready()) {
+            LOG_INFO("🔚 ASR端点: 文本稳定 {}帧 → \"{}\"", asr_stable_frames, asr_last_partial);
+        }
+        if ((vad->segment_ready() || speech_timeout || asr_trigger) && (!busy || !playing)) {
             auto segment = vad->pop_segment();
 
             // 检查最小长度：至少 0.5 秒
@@ -1065,6 +1118,10 @@ void VoicePipeline::capture_loop()
 
             int gen = generation_.fetch_add(1) + 1;
 
+            // 重置 ASR 稳定性检测（新语音段开始）
+            asr_last_partial.clear();
+            asr_stable_frames = 0;
+
             // 流式 ASR 最终识别（在 capture 线程完成，隐藏 ASR 延迟）
             std::string stream_text;
             if (stream_asr_.initialized()) {
@@ -1072,48 +1129,22 @@ void VoicePipeline::capture_loop()
             }
 
             // ── 垃圾识别过滤 ──
-            // 多个维度判定：能量过低 / 纯标点 / 单字符 / 短英文幻觉
-            bool is_garbage = false;
-            if (stream_text.empty()) {
-                is_garbage = true;
-            } else {
+            // 文本级检测（纯标点/短ASCII/日韩文）+ 能量级检测
+            bool is_garbage = utf8::is_garbage_text(stream_text);
+            if (!is_garbage && !stream_text.empty()) {
                 // 计算语音段平均 RMS 能量
                 float sum_sq = 0.0f;
                 for (auto s : segment) sum_sq += s * s;
                 float avg_rms = std::sqrt(sum_sq / segment.size());
 
-                // 纯标点/空白
-                bool all_punct = true;
-                for (unsigned char c : stream_text) {
-                    if (c > 0x7F || std::isalnum(c)) { all_punct = false; break; }
-                }
-                if (all_punct) {
-                    is_garbage = true;
-                }
                 // 能量极低（< 0.005）→ 几乎肯定是回声/静音
-                else if (avg_rms < 0.005f && stream_text.size() <= 10) {
+                if (avg_rms < 0.005f && stream_text.size() <= 10) {
                     is_garbage = true;
                 }
-                // 短英文文本 + 低能量 → SenseVoice 静音幻觉
-                else if (avg_rms < vad_cfg.min_energy_threshold) {
-                    bool all_ascii = true;
-                    for (unsigned char c : stream_text) {
-                        if (c > 0x7F) { all_ascii = false; break; }
-                    }
-                    if (all_ascii && stream_text.size() <= 6) {
-                        is_garbage = true;
-                    }
-                }
-                // 日语假名检测（ひらがな/カタカナ）→ SenseVoice 误判语言
-                else if (!is_garbage) {
-                    for (size_t i = 0; i + 2 < stream_text.size(); ++i) {
-                        unsigned char b0 = stream_text[i];
-                        unsigned char b1 = stream_text[i+1];
-                        if (b0 == 0xE3 && b1 >= 0x81 && b1 <= 0x83) {
-                            is_garbage = true;
-                            break;
-                        }
-                    }
+                // 短文本 + 低于 min_energy_threshold → SenseVoice 静音幻觉
+                else if (avg_rms < vad_cfg.min_energy_threshold
+                         && stream_text.size() <= 6) {
+                    is_garbage = true;
                 }
             }
             if (is_garbage) {
@@ -1180,7 +1211,7 @@ void VoicePipeline::process_loop()
             segment_queue_.pop();
         }
 
-        // 标记处理中 → capture 线程暂停收集新段（避免 generation 递增导致过期）
+        // 标记处理中（capture 线程仍然收集新段，但播放中除外防止回声）
         process_busy_ = true;
 
         int my_gen = seg.generation;
@@ -1188,6 +1219,7 @@ void VoicePipeline::process_loop()
         // 检查是否已有更新的语音段（当前段已过期）
         if (my_gen < generation_.load()) {
             std::cout << "   ⏭️ 语音段 #" << my_gen << " 已过期，丢弃" << std::endl;
+            process_busy_ = false;
             continue;
         }
 
@@ -1201,6 +1233,7 @@ void VoicePipeline::process_loop()
             const std::string wav_file = "temp_interactive_" + std::to_string(my_gen) + ".wav";
             if (!wav_utils::write_wav_float(wav_file, seg.samples, 16000)) {
                 LOG_ERROR("   ❌ 写入 WAV 失败");
+                process_busy_ = false;
                 continue;
             }
             prompt = asr_.transcribe(wav_file);
@@ -1209,18 +1242,21 @@ void VoicePipeline::process_loop()
 
         if (prompt.empty()) {
             LOG_INFO("   ⚠️ 未识别到有效语音");
+            process_busy_ = false;
             continue;
         }
 
         // 再次检查是否过期（ASR 可能耗时）
         if (my_gen < generation_.load()) {
             std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 ASR 后过期" << std::endl;
+            process_busy_ = false;
             continue;
         }
 
         // 3) 唤醒词检查（可选的）／声纹识别
         if (kws_.enabled() && !kws_.detect(prompt)) {
             LOG_INFO("   ⚠️ 未检测到唤醒词，跳过");
+            process_busy_ = false;
             continue;
         }
 
@@ -1272,11 +1308,15 @@ void VoicePipeline::process_loop()
             reply = llm_.chat(prompt, context, extra);
         }
 
-        if (reply.empty()) continue;
+        if (reply.empty()) {
+            process_busy_ = false;
+            continue;
+        }
 
         // 再次检查是否过期（ReAct/LLM 可能耗时较长）
         if (my_gen < generation_.load()) {
             std::cout << "   ⏭️ 语音段 #" << my_gen << " 在推理后过期，丢弃回复" << std::endl;
+            process_busy_ = false;
             continue;
         }
 
@@ -1321,6 +1361,13 @@ void VoicePipeline::process_loop()
             // Piper：写出 WAV → 异步播放（可被打断）
             const std::string tts_wav = "temp_reply_interactive_piper.wav";
             if (tts_.synthesize(reply, tts_wav, prompt, ve)) {
+                // 播放前最后检查是否过期（推理中可能已有新语音段入队）
+                if (my_gen < generation_.load()) {
+                    std::cout << "   ⏭️ 语音段 #" << my_gen << " 在播放前过期" << std::endl;
+                    std::remove(tts_wav.c_str());
+                    process_busy_ = false;
+                    continue;
+                }
                 LOG_INFO("   🔊 播放中...");
                 is_playing_ = true;
                 pid_t pid = AudioPlayer::play_async(tts_wav);
@@ -1338,6 +1385,7 @@ void VoicePipeline::process_loop()
             const std::string tts_file = "temp_reply_interactive_" + std::to_string(my_gen) + ".wav";
             if (!tts_.synthesize(reply, tts_file, prompt, ve)) {
                 LOG_ERROR("   ❌ TTS 合成失败");
+                process_busy_ = false;
                 continue;
             }
 
@@ -1345,6 +1393,7 @@ void VoicePipeline::process_loop()
             if (my_gen < generation_.load()) {
                 std::cout << "   ⏭️ 语音段 #" << my_gen << " 在 TTS 后过期" << std::endl;
                 std::remove(tts_file.c_str());
+                process_busy_ = false;
                 continue;
             }
 

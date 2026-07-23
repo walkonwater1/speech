@@ -19,6 +19,7 @@
 #include "denoiser.h"
 #include "vad.h"
 #include "streaming_asr.h"
+#include "utf8_utils.h"
 
 class StreamingSession {
 public:
@@ -70,6 +71,8 @@ public:
             const char* p = stream_asr_.partial();
             if (p && p[0] != '\0') {
                 std::string cur(p);
+                // 过滤噪声幻觉（纯标点/短ASCII/日韩文）
+                if (utf8::is_garbage_text(cur)) return "";
                 if (cur != partial_text_) {
                     partial_text_ = cur;
                     nlohmann::json j;
@@ -159,45 +162,24 @@ public:
         segment_complete_ = false;
     }
 
-    /// 提取自 capture_loop 的垃圾过滤逻辑
+    /// 提取自 capture_loop 的垃圾过滤逻辑（音频能量 + 文本内容双重检测）
     static bool is_garbage(const std::vector<float>& segment,
                            const std::string& text,
                            const VADConfig& vad_cfg)
     {
-        if (text.empty()) return true;
+        // 文本级检测（纯标点/短ASCII/日韩文 → 肯定是噪声幻觉）
+        if (utf8::is_garbage_text(text)) return true;
 
         // 计算平均 RMS 能量
         float sum_sq = 0.0f;
         for (auto s : segment) sum_sq += s * s;
         float avg_rms = std::sqrt(sum_sq / segment.size());
 
-        // 纯标点/空白
-        bool all_punct = true;
-        for (unsigned char c : text) {
-            if (c > 0x7F || std::isalnum(c)) { all_punct = false; break; }
-        }
-        if (all_punct) return true;
-
         // 能量极低 (< 0.005) + 短文本 → 回声/静音幻觉
         if (avg_rms < 0.005f && text.size() <= 10) return true;
 
-        // 短英文 + 低于 min_energy_threshold → SenseVoice 静音幻觉
-        if (avg_rms < vad_cfg.min_energy_threshold) {
-            bool all_ascii = true;
-            for (unsigned char c : text) {
-                if (c > 0x7F) { all_ascii = false; break; }
-            }
-            if (all_ascii && text.size() <= 6) return true;
-        }
-
-        // 日语假名检测（ひらがな/カタカナ U+3040-U+30FF）
-        for (size_t i = 0; i + 2 < text.size(); ++i) {
-            unsigned char b0 = text[i];
-            unsigned char b1 = text[i + 1];
-            if (b0 == 0xE3 && b1 >= 0x81 && b1 <= 0x83) {
-                return true;
-            }
-        }
+        // 短文本 + 低于 min_energy_threshold → SenseVoice 静音幻觉
+        if (avg_rms < vad_cfg.min_energy_threshold && text.size() <= 6) return true;
 
         return false;
     }

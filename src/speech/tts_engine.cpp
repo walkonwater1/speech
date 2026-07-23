@@ -248,8 +248,9 @@ static std::string add_breathing_pauses(const std::string& text)
         result.append(text, i, char_bytes);
         i += char_bytes;
 
-        // 每 12 个汉字无标点时插入逗号（在非标点位置之后）
-        if (chars_since_pause >= 12 && i < text.size()) {
+        // 每 20 个汉字无标点时插入逗号（在非标点位置之后）
+        // 阈值设高避免打断词语（如"天气情况"、"提供"、"其他"等）
+        if (chars_since_pause >= 20 && i < text.size()) {
             unsigned char nc = static_cast<unsigned char>(text[i]);
             // 确保后一个字符不是标点，也不是英文
             if (nc >= 0x80 || nc == ' ') {

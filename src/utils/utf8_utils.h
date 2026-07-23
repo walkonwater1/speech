@@ -79,4 +79,80 @@ inline std::string strip_ascii_letters(const std::string& text)
     return cleaned;
 }
 
+/// 纯文本级垃圾检测（不依赖音频能量）
+/// 用于过滤流式 ASR 部分结果中的噪声幻觉：
+///   SenseVoice 对静音/噪声会输出 ".", "Okay.", "Thank.", "あ.", "그." 等
+///
+/// 检测维度：
+///   1. 空文本 / 纯空白
+///   2. 纯标点（ASCII + 中文标点）
+///   3. 短纯 ASCII 文本（≤10 字符）→ 英文幻觉，中文模型不应输出纯英文
+///   4. 日语假名（ひらがな E381-83 / カタカナ E382-83 / 半角 E38284-86）
+///   5. 韩文音节（EA B0-BF / EB 80-BF / EC 80-BF / ED 80-9E）
+inline bool is_garbage_text(const std::string& text)
+{
+    if (text.empty()) return true;
+
+    // 去掉首尾空白
+    size_t start = 0, end = text.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(text[start]))) ++start;
+    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
+    if (start >= end) return true;
+
+    // ── 1. 纯标点检测 ────────────────────────────────
+    bool has_content = false;
+    for (size_t i = start; i < end; ) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        int clen = char_len(c);
+        if (clen >= 2) {
+            has_content = true;   // 多字节字符 = 有实质内容
+            i += clen;
+        } else if (std::isalnum(c)) {
+            has_content = true;   // ASCII 字母数字
+            ++i;
+        } else {
+            ++i;  // 标点/空白，跳过
+        }
+    }
+    if (!has_content) return true;  // 全是标点/空白
+
+    // ── 2. 短纯 ASCII 文本（SenseVoice 英文幻觉）─────
+    //    中文 TTS/LLM 模型无法处理纯英文，且噪声极少产生真实英文
+    bool all_ascii = true;
+    int ascii_alnum_count = 0;
+    for (size_t i = start; i < end; ++i) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c > 0x7F) { all_ascii = false; break; }
+        if (std::isalnum(c)) ++ascii_alnum_count;
+    }
+    if (all_ascii && ascii_alnum_count <= 10) return true;
+
+    // ── 3. 日语假名检测（SenseVoice 误判语言）────────
+    //    ひらがな U+3040-309F: E3 81 80 – E3 82 9F
+    //    カタカナ U+30A0-30FF: E3 82 A0 – E3 83 BF
+    //    半角カナ U+FF65-FF9F: EF BD A5 – EF BE 9F
+    for (size_t i = start; i + 2 < end; ++i) {
+        unsigned char b0 = static_cast<unsigned char>(text[i]);
+        unsigned char b1 = static_cast<unsigned char>(text[i + 1]);
+        if (b0 == 0xE3 && b1 >= 0x81 && b1 <= 0x83) return true;
+        if (b0 == 0xEF && b1 >= 0xBD && b1 <= 0xBE) return true;
+    }
+
+    // ── 4. 韩文音节检测（SenseVoice 误判语言）────────
+    //    한글 U+AC00-D7A3: EA B0 80 – ED 9E A3
+    for (size_t i = start; i + 2 < end; ++i) {
+        unsigned char b0 = static_cast<unsigned char>(text[i]);
+        unsigned char b1 = static_cast<unsigned char>(text[i + 1]);
+        if (b0 >= 0xEA && b0 <= 0xED) {
+            // 韩文音节范围检查
+            if (b0 == 0xEA && b1 >= 0xB0) return true;
+            if (b0 == 0xEB) return true;
+            if (b0 == 0xEC) return true;
+            if (b0 == 0xED && b1 <= 0x9E) return true;
+        }
+    }
+
+    return false;
+}
+
 } // namespace utf8

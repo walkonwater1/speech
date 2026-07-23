@@ -24,6 +24,7 @@
 #include <algorithm>
 #include "logger.h"
 #include "wav_utils.h"
+#include "utf8_utils.h"
 
 // ── StreamingASR 构造/析构 ────────────────────────────
 
@@ -302,9 +303,12 @@ void StreamingASR::decode_online()
             new_text = new_text.substr(pos + 1);
         }
         if (new_text != online_partial_) {
-            online_partial_ = new_text;
-            if (partial_cb_) {
-                partial_cb_(online_partial_.c_str());
+            // 过滤噪声幻觉（纯标点/短ASCII/日韩文）
+            if (!utf8::is_garbage_text(new_text)) {
+                online_partial_ = new_text;
+                if (partial_cb_) {
+                    partial_cb_(online_partial_.c_str());
+                }
             }
         }
         SherpaOnnxDestroyOnlineRecognizerResult(r);
@@ -333,16 +337,21 @@ void StreamingASR::run_chunked_partial()
     std::string text = asr->transcribe(wav);
     std::remove(wav.c_str());
 
-    // 保持最长的部分识别结果（避免后续含更多静音的块产生更差的结果）
-    if (!text.empty() && text.size() > partial_text_.size()) {
+    // 过滤噪声幻觉（纯标点/短ASCII/日韩文）
+    bool garbage = utf8::is_garbage_text(text);
+
+    // 保持最长的非垃圾部分识别结果
+    if (!garbage && !text.empty() && text.size() > partial_text_.size()) {
         partial_text_ = text;
         if (partial_cb_) {
             partial_cb_(partial_text_.c_str());
         }
     }
 
-    std::cout << "   🎤 [部分#" << chunk_count_
-              << " " << audio_duration() << "s] " << text << std::endl;
+    if (!garbage) {
+        std::cout << "   🎤 [部分#" << chunk_count_
+                  << " " << audio_duration() << "s] " << text << std::endl;
+    }
 }
 
 std::string StreamingASR::run_chunked_final()
