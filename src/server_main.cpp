@@ -110,6 +110,27 @@ int main(int argc, char* argv[])
     WsVoiceServer server(ws_cfg);
     server.set_pipeline(&pipeline);
 
+    // 配置推流参数（从 PipelineConfig 映射到 VAD + ASR 配置）
+    {
+        VADConfig vad_cfg;
+        vad_cfg.energy_threshold       = cfg.vad_energy_threshold;
+        vad_cfg.min_speech_frames      = cfg.vad_min_speech_frames;
+        vad_cfg.min_silence_frames     = cfg.vad_min_silence_frames;
+        vad_cfg.pre_speech_frames      = cfg.vad_pre_speech_frames;
+        vad_cfg.adaptive_factor        = cfg.vad_adaptive_factor;
+        vad_cfg.min_energy_threshold   = cfg.vad_min_energy;
+        vad_cfg.silence_cooldown_frames = cfg.vad_cooldown_frames;
+
+        StreamingASRConfig asr_cfg;
+        asr_cfg.backend           = cfg.streaming_asr_backend;
+        asr_cfg.model_path        = cfg.streaming_asr_model.empty()
+                                        ? cfg.asr_model_path : cfg.streaming_asr_model;
+        asr_cfg.min_chunk_seconds = cfg.streaming_min_chunk;
+        asr_cfg.chunk_interval    = cfg.streaming_chunk_intv;
+
+        server.configure_streaming(vad_cfg, asr_cfg);
+    }
+
     g_server = &server;
     signal(SIGINT,  signal_handler);
     signal(SIGTERM, signal_handler);

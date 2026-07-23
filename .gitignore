@@ -50,6 +50,12 @@ pretrained_models/*
 *_pb2_grpc.py
 *_pb2.py
 
+# Log files
+*.log
+
+# Model files (too large for git)
+models/
+
 # Temp recording/synthesis files
 temp_*
 out_answer/

@@ -19,7 +19,7 @@ struct PipelineConfig {
 
     // ── LLM ────────────────────────────────────────
     std::string ollama_host   = "http://127.0.0.1:11434";
-    std::string llm_model     = "qwen2.5:1.5b";
+    std::string llm_model     = "qwen2.5:7b";
     std::string system_prompt = "你叫小千，是一个18岁的女大学生，性格活泼开朗。回答简洁有趣，不超过50字。只使用中文回答，不要用日语或任何其他语言。";
 
     // ── TTS ────────────────────────────────────────
@@ -54,8 +54,11 @@ struct PipelineConfig {
     int   max_response_chars    = 80;      // 回复最大字数（超出截断），0=不限制
 
     // ── 对话记忆 ───────────────────────────────────
-    int max_rounds = 5;
-    int max_tokens = 1024;
+    int max_rounds = 10;
+    int max_tokens = 2048;
+    std::string memory_persist_dir = "data/memory";  // 持久化目录
+    bool memory_long_term_enabled  = true;            // 长期记忆开关
+    bool memory_auto_extract       = true;            // 自动提取个人信息
 
     // ── 技能 ───────────────────────────────────────
     bool skill_weather    = true;

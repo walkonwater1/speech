@@ -17,6 +17,7 @@
 #include "voice_pipeline.h"
 #include "denoiser.h"
 #include "wav_utils.h"
+#include "skill_memory.h"
 
 #include <iostream>
 #include <cstdio>
@@ -28,6 +29,26 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include "logger.h"
+
+// ── 辅助：构建增强的 extra_context（注入用户长期记忆）─
+
+static std::string build_extra_context(
+    const std::string& base_extra,
+    const UserMemoryStore& user_mem,
+    bool long_term_enabled)
+{
+    std::string extra = base_extra;
+
+    if (long_term_enabled) {
+        std::string user_ctx = user_mem.get_all_as_context();
+        if (!user_ctx.empty()) {
+            // 用户记忆放在最前面，确保 LLM 优先知道
+            extra = user_ctx + "\n" + extra;
+        }
+    }
+
+    return extra;
+}
 
 // ── 构造 / 初始化 ────────────────────────────────────
 
@@ -162,13 +183,33 @@ bool VoicePipeline::initialize()
         }
     }
 
+    // ── 初始化长期记忆 (持久化) ─────────────────────
+    memory_dir_ = cfg_.memory_persist_dir;
+    if (!memory_dir_.empty()) {
+        // 创建持久化目录
+        std::string mkdir_cmd = "mkdir -p " + memory_dir_;
+        (void)system(mkdir_cmd.c_str());
+
+        // 从磁盘加载已有记忆
+        load_all_memory();
+    }
+
+    // 注册记忆技能（需要 UserMemoryStore 引用）
+    if (cfg_.memory_long_term_enabled) {
+        skill_mgr_.add_skill(std::make_unique<MemorySkill>(&user_memory_));
+        skill_mgr_.set_enabled("memory", true);
+        LOG_INFO("[Memory] 🧠 长期记忆已启用 (持久化目录: {})", memory_dir_);
+    }
+
     std::cout << "[5/5] Ollama: " << cfg_.llm_model
               << " (" << cfg_.ollama_host << ")" << std::endl;
 
     LOG_INFO("   特性: ");
     if (kws_.enabled()) std::cout << "唤醒词=\"" << cfg_.wake_word << "\" ";
     std::cout << "声纹(阈值=" << cfg_.sv_threshold << ") ";
-    std::cout << "记忆(最近" << cfg_.max_rounds << "轮)";
+    std::cout << "记忆(最近" << cfg_.max_rounds << "轮";
+    if (cfg_.memory_long_term_enabled) std::cout << "+长期";
+    std::cout << ")";
     if (cfg_.skill_rag) std::cout << " RAG(" << cfg_.rag_docs_dir << ")";
     LOG_INFO("std::endl");
 
@@ -217,6 +258,9 @@ std::string VoicePipeline::process_text(const std::string& text)
             std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
         }
 
+        // 注入用户长期记忆
+        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
         std::string context = memory_.get_context();
         reply = llm_.chat(text, context, extra);
     }
@@ -237,7 +281,100 @@ std::string VoicePipeline::process_text(const std::string& text)
     }
 
     memory_.add(text, reply);
+    save_all_memory();  // 持久化
     speak_and_play(reply, text);
+
+    return reply;
+}
+
+std::string VoicePipeline::transcribe_file(const std::string& wav_path)
+{
+    if (!initialized_) return "";
+    return asr_.transcribe(wav_path);
+}
+
+std::string VoicePipeline::process_text_for_ws(const std::string& text,
+                                                 const std::string& wav_path)
+{
+    if (!initialized_) return "";
+
+    std::string reply;
+
+    // ── 策略 1: ReAct 多步推理（如果启用）─────────────
+    if (react_) {
+        auto tools = skill_mgr_.collect_function_defs();
+        if (!tools.empty()) {
+            auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
+                return skill_mgr_.execute_tool(name, args, "");
+            };
+
+            std::string ctx = memory_.get_context();
+            auto result = react_->run(text, tools, exec_fn, ctx, cfg_.react_max_steps);
+
+            if (result.success && !result.final_answer.empty()) {
+                reply = result.final_answer;
+            } else if (!result.success) {
+                LOG_INFO("   [ReAct] 推理失败，降级到单步模式");
+            }
+        }
+    }
+
+    // ── 策略 2: Function Calling + LLM（降级方案）─────
+    if (reply.empty()) {
+        SkillResult sr = skill_mgr_.detect_and_execute(text);
+        std::string extra = SkillManager::get_system_context();
+        if (sr.hit) {
+            extra += "\n" + sr.result_text;
+            std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+        }
+
+        // 注入用户长期记忆
+        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
+        std::string context = memory_.get_context();
+        reply = llm_.chat(text, context, extra);
+    }
+
+    if (reply.empty()) return "";
+
+    // ── 质量优化：Multi-Agent 协作 或 Reflection 反思 ──
+    if (multi_agent_) {
+        std::string cmodel = cfg_.ma_critic_model.empty()
+            ? cfg_.llm_model : cfg_.ma_critic_model;
+        auto ma = multi_agent_->collaborate(
+            text, reply, /*tool_context*/"",
+            cfg_.system_prompt, cfg_.llm_model, cmodel, cfg_.ma_max_rounds);
+        reply = ma.final_answer;
+    } else if (reflect_) {
+        auto r = reflect_->reflect(text, reply);
+        reply = r.improved;
+    }
+
+    // 回复截断（与 process_loop 保持一致）
+    if (cfg_.max_response_chars > 0 && (int)reply.size() > cfg_.max_response_chars * 3) {
+        size_t cut = (size_t)cfg_.max_response_chars * 3;
+        for (size_t off = 0; off < 60 && cut + off < reply.size(); off++) {
+            size_t pos = cut + off;
+            if (pos + 2 < reply.size() && (unsigned char)reply[pos] == 0xE3) {
+                unsigned char c1 = reply[pos+1], c2 = reply[pos+2];
+                if ((c1 == 0x80 && c2 == 0x82) ||
+                    (c1 == 0xBC && c2 == 0x81) ||
+                    (c1 == 0xBC && c2 == 0x9F)) {
+                    reply = reply.substr(0, pos + 3);
+                    break;
+                }
+            }
+        }
+    }
+
+    memory_.add(text, reply);
+    save_all_memory();  // 持久化
+
+    // TTS 合成到文件（不本地播放）
+    if (!tts_.synthesize(reply, wav_path, text)) {
+        LOG_ERROR("   ❌ TTS 合成失败");
+        return reply;  // 仍然返回 LLM 文本
+    }
 
     return reply;
 }
@@ -323,6 +460,9 @@ std::string VoicePipeline::process_voice()
             std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
         }
 
+        // 注入用户长期记忆
+        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
         std::string context = memory_.get_context();
         reply = llm_.chat(prompt, context, extra);
     }
@@ -343,6 +483,7 @@ std::string VoicePipeline::process_voice()
     }
 
     memory_.add(prompt, reply);
+    save_all_memory();  // 持久化
     speak_and_play(reply, prompt);
 
     return reply;
@@ -382,6 +523,9 @@ std::string VoicePipeline::process_voice_file(const std::string& wav_path)
         if (sr.hit) {
             extra += "\n" + sr.result_text;
         }
+        // 注入用户长期记忆
+        extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
+
         std::string context = memory_.get_context();
         reply = llm_.chat(prompt, context, extra);
     }
@@ -401,6 +545,7 @@ std::string VoicePipeline::process_voice_file(const std::string& wav_path)
     }
 
     memory_.add(prompt, reply);
+    save_all_memory();  // 持久化
     speak_and_play(reply, prompt);
 
     return reply;
@@ -469,7 +614,30 @@ bool VoicePipeline::enroll_speaker()
 void VoicePipeline::clear_memory()
 {
     memory_.clear();
+    user_memory_.clear();
     LOG_INFO("   🧹 对话记忆已清空");
+}
+
+void VoicePipeline::save_all_memory()
+{
+    if (memory_dir_.empty()) return;
+
+    std::string chat_path = memory_dir_ + "/chat_history.json";
+    std::string user_path = memory_dir_ + "/user_memory.json";
+
+    memory_.save_to_file(chat_path);
+    user_memory_.save_to_file(user_path);
+}
+
+void VoicePipeline::load_all_memory()
+{
+    if (memory_dir_.empty()) return;
+
+    std::string chat_path = memory_dir_ + "/chat_history.json";
+    std::string user_path = memory_dir_ + "/user_memory.json";
+
+    memory_.load_from_file(chat_path);
+    user_memory_.load_from_file(user_path);
 }
 
 // ── 热配置重载 (Layer 4.4) ──────────────────────────────
@@ -549,6 +717,17 @@ void VoicePipeline::reload_config(const PipelineConfig& new_cfg)
         memory_.set_limits(cfg_.max_rounds, cfg_.max_tokens);
         hot_changes++;
     }
+    // 长期记忆持久化路径
+    if (diff_str("memory_persist_dir", cfg_.memory_persist_dir, new_cfg.memory_persist_dir, cfg_.memory_persist_dir)) {
+        memory_dir_ = cfg_.memory_persist_dir;
+        if (!memory_dir_.empty()) {
+            std::string mkdir_cmd = "mkdir -p " + memory_dir_;
+            (void)system(mkdir_cmd.c_str());
+        }
+        hot_changes++;
+    }
+    diff_val("memory_long_term_enabled", cfg_.memory_long_term_enabled, new_cfg.memory_long_term_enabled, cfg_.memory_long_term_enabled);
+    diff_val("memory_auto_extract", cfg_.memory_auto_extract, new_cfg.memory_auto_extract, cfg_.memory_auto_extract);
 
     // ReAct
     if (diff_val("react_max_steps", cfg_.react_max_steps, new_cfg.react_max_steps, cfg_.react_max_steps))
@@ -1088,6 +1267,8 @@ void VoicePipeline::process_loop()
                 extra += "\n" + sr.result_text;
                 std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
             }
+            // 注入用户长期记忆
+            extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
             reply = llm_.chat(prompt, context, extra);
         }
 
@@ -1132,6 +1313,7 @@ void VoicePipeline::process_loop()
 
         // 7) 更新记忆
         memory_.add(prompt, reply);
+        save_all_memory();  // 持久化到磁盘
 
         // 7) TTS + 播放（传递声学情感用于韵律融合）
         const VoiceEmotionResult* ve = seg.voice_emo.confidence > 0.0f ? &seg.voice_emo : nullptr;

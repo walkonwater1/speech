@@ -115,6 +115,9 @@ bool PipelineConfig::load_from_file(const std::string& path)
         auto& m = j["memory"];
         try_get(m, "max_rounds", max_rounds);
         try_get(m, "max_tokens", max_tokens);
+        try_get(m, "persist_dir", memory_persist_dir);
+        try_get(m, "long_term_enabled", memory_long_term_enabled);
+        try_get(m, "auto_extract", memory_auto_extract);
     }
 
     // ── Function Calling ────────────────────────────

@@ -8,6 +8,7 @@
 
 #include "ws_server.h"
 #include "voice_pipeline.h"
+#include "streaming_session.h"
 
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <cstdint>
 #include <thread>
 #include <chrono>
 #include "logger.h"
@@ -71,6 +73,14 @@ void WsVoiceServer::set_pipeline(VoicePipeline* pipeline)
     pipeline_ = pipeline;
 }
 
+void WsVoiceServer::configure_streaming(const VADConfig& vad_cfg,
+                                          const StreamingASRConfig& asr_cfg)
+{
+    vad_cfg_ = vad_cfg;
+    stream_asr_cfg_ = asr_cfg;
+    stream_configured_ = true;
+}
+
 // ── 启动 / 停止 ──────────────────────────────────────
 
 void WsVoiceServer::run()
@@ -101,16 +111,132 @@ void WsVoiceServer::run()
     });
 
     // 连接关闭
-    srv.set_close_handler([this](connection_hdl /*hdl*/) {
+    srv.set_close_handler([this](connection_hdl hdl) {
         connection_count_--;
+        // 清理推流会话
+        uint64_t conn_id = reinterpret_cast<uint64_t>(hdl.lock().get());
+        {
+            std::lock_guard<std::mutex> lk(session_mtx_);
+            sessions_.erase(conn_id);
+        }
         std::cout << "   [WS] 🔌 客户端断开 ("
                   << connection_count_.load() << " 活跃)" << std::endl;
     });
 
-    // 消息处理
+    // 消息处理（支持 text + binary + 推流控制）
     srv.set_message_handler([this](connection_hdl hdl, WsServer::message_ptr msg) {
+        auto op = msg->get_opcode();
+        uint64_t conn_id = reinterpret_cast<uint64_t>(hdl.lock().get());
+
+        if (op == websocketpp::frame::opcode::binary) {
+            // ── 二进制帧 → 推流音频 ──
+            StreamingSession* session = nullptr;
+            {
+                std::lock_guard<std::mutex> lk(session_mtx_);
+                auto it = sessions_.find(conn_id);
+                if (it != sessions_.end()) session = it->second.get();
+            }
+
+            if (!session) {
+                json err;
+                err["type"] = ws_protocol::TYPE_ERROR;
+                err["message"] = "推流未启动，请先发送 {\"type\":\"stream_start\"}";
+                try { impl_->server.send(hdl, err.dump(), text); } catch (...) {}
+                return;
+            }
+
+            const std::string& payload = msg->get_payload();
+            const int16_t* raw = reinterpret_cast<const int16_t*>(payload.data());
+            int n_samples = payload.size() / sizeof(int16_t);
+            if (n_samples == 0) return;
+
+            std::string event_json = session->process_audio_frame(raw, n_samples);
+            if (!event_json.empty()) {
+                try { impl_->server.send(hdl, event_json, text); } catch (...) {}
+            }
+
+            // 语音段完成 → LLM + TTS
+            if (session->segment_complete()) {
+                std::string final_text = session->final_text();
+
+                std::string reply_text;
+                std::string tts_wav = "temp_ws_stream_"
+                    + std::to_string(conn_id) + ".wav";
+                {
+                    std::lock_guard<std::mutex> lk(pipeline_mutex_);
+                    reply_text = pipeline_->process_text_for_ws(final_text, tts_wav);
+                }
+
+                // 读取 TTS WAV → base64
+                std::string audio_b64 = file_to_base64(tts_wav);
+                std::remove(tts_wav.c_str());
+
+                json resp;
+                resp["type"] = ws_protocol::TYPE_REPLY;
+                resp["text"] = reply_text;
+                if (!audio_b64.empty()) {
+                    resp["audio"] = audio_b64;
+                    resp["audio_fmt"] = "wav";
+                }
+                try { impl_->server.send(hdl, resp.dump(), text); } catch (...) {}
+
+                session->reset();
+            }
+            return;
+        }
+
+        // ── 文本帧：先检查推流控制消息 ──
+        std::string payload = msg->get_payload();
         try {
-            std::string response = handle_message(msg->get_payload());
+            auto j = json::parse(payload);
+            std::string type = j.value("type", "");
+
+            if (type == ws_protocol::TYPE_STREAM_START) {
+                std::string resp = process_stream_start(conn_id);
+                if (!resp.empty()) impl_->server.send(hdl, resp, text);
+                return;
+            }
+            if (type == ws_protocol::TYPE_STREAM_END) {
+                // 强制结束 → 可能产生 speech_end
+                std::string event_json = process_stream_end(conn_id);
+                if (!event_json.empty()) {
+                    impl_->server.send(hdl, event_json, text);
+                }
+                // 如果有完整语音段 → LLM+TTS
+                StreamingSession* session = nullptr;
+                {
+                    std::lock_guard<std::mutex> lk(session_mtx_);
+                    auto it = sessions_.find(conn_id);
+                    if (it != sessions_.end()) session = it->second.get();
+                }
+                if (session && session->segment_complete()) {
+                    std::string final_text = session->final_text();
+                    std::string reply_text;
+                    std::string tts_wav = "temp_ws_stream_"
+                        + std::to_string(conn_id) + ".wav";
+                    {
+                        std::lock_guard<std::mutex> lk(pipeline_mutex_);
+                        reply_text = pipeline_->process_text_for_ws(final_text, tts_wav);
+                    }
+                    std::string audio_b64 = file_to_base64(tts_wav);
+                    std::remove(tts_wav.c_str());
+                    json resp;
+                    resp["type"] = ws_protocol::TYPE_REPLY;
+                    resp["text"] = reply_text;
+                    if (!audio_b64.empty()) {
+                        resp["audio"] = audio_b64;
+                        resp["audio_fmt"] = "wav";
+                    }
+                    try { impl_->server.send(hdl, resp.dump(), text); } catch (...) {}
+                    session->reset();
+                }
+                return;
+            }
+        } catch (...) {}
+
+        // ── 普通文本消息 ──
+        try {
+            std::string response = handle_message(payload);
             if (!response.empty()) {
                 impl_->server.send(hdl, response, text);
             }
@@ -118,9 +244,7 @@ void WsVoiceServer::run()
             json err;
             err["type"]    = ws_protocol::TYPE_ERROR;
             err["message"] = std::string("处理消息异常: ") + e.what();
-            try {
-                impl_->server.send(hdl, err.dump(), text);
-            } catch (...) {}
+            try { impl_->server.send(hdl, err.dump(), text); } catch (...) {}
         }
     });
 
@@ -223,8 +347,51 @@ std::string WsVoiceServer::handle_message(const std::string& raw_json)
     json err;
     err["type"]    = ws_protocol::TYPE_ERROR;
     err["message"] = "未知消息类型: " + type;
-    err["supported"] = {"text", "audio", "enroll", "identify"};
+    err["supported"] = {"text", "audio", "enroll", "identify", "stream_start", "stream_end"};
     return err.dump();
+}
+
+// ── 推流控制 ──────────────────────────────────────────
+
+std::string WsVoiceServer::process_stream_start(uint64_t conn_id)
+{
+    if (!stream_configured_) {
+        json err;
+        err["type"] = ws_protocol::TYPE_ERROR;
+        err["message"] = "推流未配置，请联系管理员";
+        return err.dump();
+    }
+
+    std::lock_guard<std::mutex> lk(session_mtx_);
+    sessions_[conn_id] = std::make_unique<StreamingSession>(vad_cfg_, stream_asr_cfg_);
+
+    std::cout << "   [WS] 🎙️ 推流开始 (conn=" << conn_id
+              << ", 活跃推流=" << sessions_.size() << ")" << std::endl;
+
+    json resp;
+    resp["type"] = ws_protocol::TYPE_STREAM_READY;
+    return resp.dump();
+}
+
+std::string WsVoiceServer::process_stream_end(uint64_t conn_id)
+{
+    StreamingSession* session = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(session_mtx_);
+        auto it = sessions_.find(conn_id);
+        if (it != sessions_.end()) {
+            session = it->second.get();
+        }
+    }
+
+    if (!session) return "";
+
+    std::string event_json = session->force_end_utterance();
+    if (session->segment_complete()) {
+        // 需要在 lambda 中处理 LLM+TTS（需要 connection_hdl 来发送 reply）
+        // 这里只返回 speech_end event
+    }
+    return event_json;
 }
 
 // ── 文本处理 ──────────────────────────────────────────
@@ -264,33 +431,35 @@ std::string WsVoiceServer::process_audio_message(const std::string& base64_wav)
         return err.dump();
     }
 
-    const std::string wav_path = "temp_ws_audio.wav";
+    const std::string in_wav = "temp_ws_audio.wav";
+    const std::string tts_wav = "temp_ws_reply.wav";
     {
-        std::ofstream f(wav_path, std::ios::binary);
+        std::ofstream f(in_wav, std::ios::binary);
         f.write(wav_data.data(), wav_data.size());
     }
 
-    // 通过 pipeline 处理（使用文件路径，跳过录音步骤）
     std::string reply;
     {
         std::lock_guard<std::mutex> lk(pipeline_mutex_);
-        reply = pipeline_->process_voice_file(wav_path);
+
+        // ASR 转写
+        std::string prompt = pipeline_->transcribe_file(in_wav);
+        std::remove(in_wav.c_str());
+
+        if (prompt.empty()) {
+            json err;
+            err["type"]    = ws_protocol::TYPE_ERROR;
+            err["message"] = "语音识别未检测到内容";
+            return err.dump();
+        }
+
+        // LLM + TTS（不本地播放）
+        reply = pipeline_->process_text_for_ws(prompt, tts_wav);
     }
 
-    std::remove(wav_path.c_str());
-
-    // 读取合成的 TTS 音频
-    std::string audio_b64;
-    const std::string tts_file = "temp_reply.wav";
-    std::ifstream af(tts_file, std::ios::binary);
-    if (af.is_open()) {
-        std::ostringstream oss;
-        oss << af.rdbuf();
-        audio_b64 = base64_encode(
-            (const unsigned char*)oss.str().data(), oss.str().size());
-        af.close();
-        std::remove(tts_file.c_str());
-    }
+    // 读取 TTS 音频 → base64
+    std::string audio_b64 = file_to_base64(tts_wav);
+    std::remove(tts_wav.c_str());
 
     json resp;
     resp["type"]  = ws_protocol::TYPE_REPLY;

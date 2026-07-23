@@ -49,6 +49,7 @@ set(SOURCES
     brain/skills/skill_time.cpp
     brain/skills/skill_search.cpp
     brain/skills/skill_rag.cpp
+    brain/skills/skill_memory.cpp
 
     llm/llm_engine.cpp
     llm/prompt_builder.cpp
@@ -61,6 +62,7 @@ set(SOURCES
     llm/multi_agent.cpp
 
     memory/chat_memory.cpp
+    memory/user_memory.cpp
     memory/document_chunker.cpp
 
     audio/audio_io.cpp
@@ -89,6 +91,7 @@ set(HEADERS
     brain/skills/skill_time.h
     brain/skills/skill_search.h
     brain/skills/skill_rag.h
+    brain/skills/skill_memory.h
 
     llm/llm_engine.h
     llm/prompt_builder.h
@@ -101,6 +104,7 @@ set(HEADERS
     llm/multi_agent.h
 
     memory/chat_memory.h
+    memory/user_memory.h
     memory/vector_store.h
     memory/document_chunker.h
 

@@ -34,9 +34,14 @@
 #include <map>
 #include <atomic>
 #include <functional>
+#include <cstdint>
+
+#include "vad.h"
+#include "streaming_asr.h"
 
 // 前向声明
 class VoicePipeline;
+class StreamingSession;
 
 // ── 协议消息类型 ──────────────────────────────────────
 
@@ -54,6 +59,13 @@ inline constexpr const char* TYPE_AUDIO_OUT = "audio_out";
 inline constexpr const char* TYPE_ERROR    = "error";
 inline constexpr const char* TYPE_ENROLLED = "enrolled";
 inline constexpr const char* TYPE_IDENTITY = "identity";
+
+// 推流协议
+inline constexpr const char* TYPE_STREAM_START = "stream_start";
+inline constexpr const char* TYPE_STREAM_END   = "stream_end";
+inline constexpr const char* TYPE_STREAM_READY = "stream_ready";
+inline constexpr const char* TYPE_PARTIAL      = "partial";
+inline constexpr const char* TYPE_SPEECH_END   = "speech_end";
 
 }
 
@@ -81,6 +93,9 @@ public:
     /// 设置共享的 VoicePipeline（必须先初始化好）
     void set_pipeline(VoicePipeline* pipeline);
 
+    /// 配置推流参数（从 PipelineConfig 提取 VAD + ASR 配置）
+    void configure_streaming(const VADConfig& vad_cfg, const StreamingASRConfig& asr_cfg);
+
     /// 启动服务（阻塞当前线程）
     void run();
 
@@ -102,6 +117,13 @@ private:
     // 管道互斥锁（序列化对共享 VoicePipeline 的访问）
     std::mutex pipeline_mutex_;
 
+    // 推流会话管理
+    std::mutex session_mtx_;
+    std::map<uint64_t, std::unique_ptr<StreamingSession>> sessions_;
+    VADConfig vad_cfg_;
+    StreamingASRConfig stream_asr_cfg_;
+    bool stream_configured_ = false;
+
     // 内部实现（PIMPL 隐藏 websocketpp 头文件依赖）
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -116,6 +138,12 @@ private:
 
     /// 处理音频输入（base64 WAV → 保存 → ASR → LLM → TTS）
     std::string process_audio_message(const std::string& base64_wav);
+
+    /// 处理推流启动
+    std::string process_stream_start(uint64_t conn_id);
+
+    /// 处理推流结束（返回 speech_end JSON 或 ""）
+    std::string process_stream_end(uint64_t conn_id);
 
     /// 处理声纹注册
     std::string process_enroll_message(const std::string& name);

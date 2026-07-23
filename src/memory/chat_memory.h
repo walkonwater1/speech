@@ -32,6 +32,14 @@ public:
     /// 运行时更新记忆限制（支持热配置重载 Layer 4.4）
     void set_limits(int max_rounds, int max_tokens);
 
+    // ── 持久化 ─────────────────────────────────────
+
+    /// 保存对话历史到 JSON 文件
+    bool save_to_file(const std::string& path) const;
+
+    /// 从 JSON 文件加载对话历史（追加到现有历史，不清空）
+    bool load_from_file(const std::string& path);
+
     // ── Token 统计（可观测性）───────────────────────
 
     /// 当前估算 token 数

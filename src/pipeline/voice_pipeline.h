@@ -42,6 +42,7 @@
 #include "speaker_verifier.h"
 #include "voiceprint_library.h"
 #include "chat_memory.h"
+#include "user_memory.h"
 #include "audio_io.h"
 #include "vad.h"
 #include "skill_manager.h"
@@ -64,6 +65,20 @@ public:
     /// @return LLM 回复文本
     std::string process_text(const std::string& text);
 
+    /// 文字输入 → LLM → TTS 合成到文件（WebSocket 用，不本地播放）
+    /// @param text     用户输入文本
+    /// @param wav_path TTS 输出 WAV 文件路径
+    /// @return LLM 回复文本
+    std::string process_text_for_ws(const std::string& text, const std::string& wav_path);
+
+    /// 只读访问管线配置
+    const PipelineConfig& config() const { return cfg_; }
+
+    /// 离线 ASR 转写（WebSocket 用）
+    /// @param wav_path  WAV 文件路径
+    /// @return 识别文本，失败返回空串
+    std::string transcribe_file(const std::string& wav_path);
+
     /// 录音 → ASR → 唤醒词 → 声纹 → LLM → TTS → 播放
     /// @return LLM 回复文本（失败返回空串）
     std::string process_voice();
@@ -78,6 +93,15 @@ public:
 
     /// 清空对话记忆
     void clear_memory();
+
+    /// 获取长期记忆存储（供外部注册 MemorySkill）
+    UserMemoryStore& user_memory() { return user_memory_; }
+
+    /// 持久化所有记忆到磁盘
+    void save_all_memory();
+
+    /// 从磁盘加载所有记忆
+    void load_all_memory();
 
     /// 热重载配置（Layer 4.4）
     /// Tier 1 字段立即生效，Tier 2/3 字段记录警告需重启
@@ -106,6 +130,8 @@ private:
     SpeakerVerifier   speaker_;       // 旧版单用户声纹（向后兼容）
     VoiceprintLibrary voiceprint_;   // 新版多用户声纹库 (Layer 3.4)
     ChatMemory        memory_;
+    UserMemoryStore   user_memory_;
+    std::string       memory_dir_;   // 持久化目录路径
     SkillManager      skill_mgr_;
     AudioRecorder     recorder_;
     std::shared_ptr<EmbeddingEngine> embed_;  // RAG 共用
