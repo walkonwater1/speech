@@ -20,6 +20,10 @@
 #include "skills/skill_notes.h"
 #include "skills/skill_calculator.h"
 #include "skills/skill_entertainment.h"
+#include "skills/skill_riddle.h"
+#include "skills/skill_fortune.h"
+#include "skills/skill_poetry.h"
+#include "skills/skill_games.h"
 #include "function_caller.h"
 #include "embedding_engine.h"
 
@@ -40,6 +44,10 @@ SkillManager::SkillManager()
     add_skill(std::make_unique<NotesSkill>());
     add_skill(std::make_unique<CalculatorSkill>());
     add_skill(std::make_unique<EntertainmentSkill>());
+    add_skill(std::make_unique<RiddleSkill>());
+    add_skill(std::make_unique<FortuneSkill>());
+    add_skill(std::make_unique<PoetrySkill>());
+    add_skill(std::make_unique<GamesSkill>());
 }
 
 void SkillManager::add_skill(std::unique_ptr<Skill> skill)
@@ -118,7 +126,7 @@ SkillResult SkillManager::detect_and_execute(const std::string& user_text)
                     if (!result.empty()) {
                         std::cout << "   [Skill-FC] \"" << user_text
                                   << "\" → LLM 选择了 " << td.tool_name << std::endl;
-                        return {true, td.tool_name, result};
+                        return {true, skill->is_direct_response(), td.tool_name, result};
                     }
                 } else {
                     std::cout << "   [Skill-FC] LLM 选了未知工具: "
@@ -137,7 +145,7 @@ SkillResult SkillManager::detect_and_execute(const std::string& user_text)
             if (!result.empty()) {
                 std::cout << "   [Skill-KW] \"" << user_text
                           << "\" → 关键字匹配 " << s->name() << std::endl;
-                return {true, s->name(), result};
+                return {true, s->is_direct_response(), s->name(), result};
             }
         }
     }

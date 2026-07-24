@@ -12,9 +12,16 @@
 // sherpa-onnx C API 前向声明
 struct SherpaOnnxOfflineRecognizer;
 
+/// ASR 模型类型
+enum class AsrModelType {
+    SENSE_VOICE,    // SenseVoice Small (原默认，多语言，易幻觉)
+    ZIPFORMER_CTC   // Zipformer CTC (中文专用，低幻觉)
+};
+
 class ASREngine {
 public:
-    explicit ASREngine(const std::string& model_path);
+    explicit ASREngine(const std::string& model_path,
+                       AsrModelType model_type = AsrModelType::SENSE_VOICE);
     ~ASREngine();
 
     // 禁止拷贝
@@ -35,6 +42,7 @@ public:
 
 private:
     std::string model_path_;
+    AsrModelType model_type_ = AsrModelType::SENSE_VOICE;
     const SherpaOnnxOfflineRecognizer* recognizer_ = nullptr;  // C API opaque pointer
     bool initialized_ = false;
     bool quiet_ = false;

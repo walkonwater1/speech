@@ -44,8 +44,11 @@ struct SherpaOnnxOnlineStream;
 struct StreamingASRConfig {
     /// 模型路径
     ///   online:  Zipformer 模型目录 (encoder/decoder/joiner/tokens)
-    ///   chunked: SenseVoice 模型目录 (model.int8.onnx + tokens.txt)
+    ///   chunked: 离线模型目录 (model.int8.onnx + tokens.txt)
     std::string model_path;
+
+    /// 模型类型 (chunked 后端使用): "sense_voice" | "zipformer_ctc"
+    std::string model_type = "sense_voice";
 
     /// 后端: "online" | "chunked"（默认 chunked，使用现有 SenseVoice）
     std::string backend = "chunked";

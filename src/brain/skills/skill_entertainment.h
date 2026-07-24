@@ -18,6 +18,8 @@ public:
     std::string execute(const std::string& text) override;
     std::string execute(const std::string& text,
                         const nlohmann::json& args) override;
+    bool is_direct_response() const override { return true; }
+
     std::string describe() const override {
         return "你可以讲笑话、段子、小故事和趣味冷知识。";
     }
@@ -31,8 +33,8 @@ public:
             "properties": {
                 "type": {
                     "type": "string",
-                    "enum": ["joke", "story", "fact"],
-                    "description": "类型: joke笑话/段子, story故事/睡前故事, fact冷知识/趣闻"
+                    "enum": ["joke", "story", "fact", "soup"],
+                    "description": "类型: joke笑话/段子, story故事/睡前故事, fact冷知识/趣闻, soup毒鸡汤"
                 }
             }
         })");
@@ -43,5 +45,6 @@ private:
     static std::string random_joke();
     static std::string random_story();
     static std::string random_fact();
+    static std::string random_soup();
     static std::string pick_random(const std::vector<std::string>& items);
 };

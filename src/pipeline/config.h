@@ -16,6 +16,7 @@
 struct PipelineConfig {
     // ── ASR ────────────────────────────────────────
     std::string asr_model_path = "src/third_party/sherpa-onnx/sense-voice-model";
+    std::string asr_model_type = "sense_voice";      // "sense_voice" | "zipformer_ctc"
 
     // ── LLM ────────────────────────────────────────
     std::string ollama_host   = "http://127.0.0.1:11434";

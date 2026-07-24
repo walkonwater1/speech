@@ -30,6 +30,7 @@ struct FunctionDef {
 
 struct SkillResult {
     bool        hit        = false;  // 是否命中某技能
+    bool        direct     = false;  // 结果直接当回复（跳过LLM），用于长内容技能
     std::string skill_name;          // 命中技能名（日志用）
     std::string result_text;         // 执行结果，将注入 LLM 上下文
 };
@@ -69,6 +70,10 @@ public:
     /// 返回 Function Calling 的函数定义（JSON Schema）
     /// 用于 LLM 驱动的工具选择
     virtual FunctionDef get_function_def() const { return {}; }
+
+    /// 是否直接返回结果（不经过 LLM 格式化）
+    /// 笑话、故事、诗词等长内容技能应返回 true，避免被 LLM 截断
+    virtual bool is_direct_response() const { return false; }
 
     const std::string& name()    const { return name_; }
     bool               enabled() const { return enabled_; }

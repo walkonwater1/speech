@@ -18,7 +18,8 @@ bool EntertainmentSkill::match(const std::string& text)
     static const std::vector<std::string> keywords = {
         "笑话", "讲个", "段子", "故事", "睡前",
         "有趣的事", "冷知识", "趣闻", "说个", "来一个",
-        "说点什么", "好玩", "开心一下"
+        "说点什么", "好玩", "开心一下",
+        "毒鸡汤", "反鸡汤", "心灵鸡汤", "丧文化"
     };
 
     // 需要明确的娱乐意图（避免"故事"误触 RAG）
@@ -174,6 +175,38 @@ std::string EntertainmentSkill::random_fact()
     return pick_random(facts);
 }
 
+// ── 毒鸡汤库 ────────────────────────────────────────────
+
+std::string EntertainmentSkill::random_soup()
+{
+    static const std::vector<std::string> soups = {
+        "努力不一定成功，但不努力一定很轻松。",
+
+        "当你觉得自己又穷又丑的时候，不要绝望——至少你的判断是对的。",
+
+        "世上无难事，只要肯放弃。",
+
+        "今天不想做的事，明天也不会想做的。",
+
+        "请相信，所有你花钱买来的教训，最后都会被证明：\n是你想多了。",
+
+        "比你优秀的人都在努力，那你努力还有什么用？",
+
+        "年轻人不要总想着躺平，你要相信——\n躺久了也会累的。",
+
+        "世界上没有真正的感同身受，\n但「我早就说了吧」这句话，每个人都能深刻体会。",
+
+        "你不是懒，你只是有一种\"把事情完美地拖到最后\"的天赋。",
+
+        "失败是成功之母，可惜成功六亲不认。",
+
+        "生活不止眼前的苟且，还有明天和后天的苟且。",
+
+        "你之所以觉得累，是因为你总是想得太多，做的太少——\n不是的，是因为你真的累了，快去睡觉吧。",
+    };
+    return pick_random(soups);
+}
+
 // ── 执行入口 ────────────────────────────────────────────
 
 std::string EntertainmentSkill::execute(const std::string& text)
@@ -196,6 +229,10 @@ std::string EntertainmentSkill::execute(const std::string& text,
                    text.find("趣闻") != std::string::npos ||
                    text.find("有趣") != std::string::npos) {
             type = "fact";
+        } else if (text.find("毒鸡汤") != std::string::npos ||
+                   text.find("反鸡汤") != std::string::npos ||
+                   text.find("丧") != std::string::npos) {
+            type = "soup";
         }
     }
 
@@ -206,6 +243,9 @@ std::string EntertainmentSkill::execute(const std::string& text,
     } else if (type == "fact") {
         std::cout << "   [Skill:娱乐] 冷知识" << std::endl;
         result = random_fact();
+    } else if (type == "soup") {
+        std::cout << "   [Skill:娱乐] 毒鸡汤" << std::endl;
+        result = random_soup();
     } else {
         std::cout << "   [Skill:娱乐] 讲笑话" << std::endl;
         result = random_joke();

@@ -1,6 +1,7 @@
 {
   "asr": {
-    "model_path": "src/third_party/sherpa-onnx/sense-voice-model"
+    "model_path": "src/third_party/sherpa-onnx/zipformer-ctc-zh",
+    "model_type": "zipformer_ctc"
   },
   "llm": {
     "host": "http://192.168.10.69:11434",
@@ -25,12 +26,12 @@
   },
   "vad": {
     "backend": "adaptive",
-    "energy_threshold": 0.005,
-    "min_speech_frames": 12,
-    "min_silence_frames": 20,
+    "energy_threshold": 0.008,
+    "min_speech_frames": 15,
+    "min_silence_frames": 15,
     "pre_speech_frames": 15,
-    "adaptive_factor": 5.0,
-    "min_energy": 0.015,
+    "adaptive_factor": 7.0,
+    "min_energy": 0.025,
     "cooldown_frames": 25
   },
   "interactive": {

@@ -54,6 +54,7 @@ bool PipelineConfig::load_from_file(const std::string& path)
     if (j.contains("asr")) {
         auto& a = j["asr"];
         try_get(a, "model_path", asr_model_path);
+        try_get(a, "model_type", asr_model_type);
     }
 
     // ── LLM ────────────────────────────────────────

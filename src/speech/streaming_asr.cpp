@@ -130,7 +130,10 @@ bool StreamingASR::init_online()
 
 bool StreamingASR::init_chunked()
 {
-    auto* asr = new ASREngine(cfg_.model_path);
+    AsrModelType mt = AsrModelType::SENSE_VOICE;
+    if (cfg_.model_type == "zipformer_ctc") mt = AsrModelType::ZIPFORMER_CTC;
+
+    auto* asr = new ASREngine(cfg_.model_path, mt);
     if (!asr->initialize()) {
         LOG_ERROR("   ❌ chunked 后端初始化失败");
         delete asr;

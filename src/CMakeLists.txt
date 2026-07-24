@@ -55,6 +55,10 @@ set(SOURCES
     brain/skills/skill_notes.cpp
     brain/skills/skill_calculator.cpp
     brain/skills/skill_entertainment.cpp
+    brain/skills/skill_riddle.cpp
+    brain/skills/skill_fortune.cpp
+    brain/skills/skill_poetry.cpp
+    brain/skills/skill_games.cpp
 
     llm/llm_engine.cpp
     llm/prompt_builder.cpp
@@ -102,6 +106,10 @@ set(HEADERS
     brain/skills/skill_notes.h
     brain/skills/skill_calculator.h
     brain/skills/skill_entertainment.h
+    brain/skills/skill_riddle.h
+    brain/skills/skill_fortune.h
+    brain/skills/skill_poetry.h
+    brain/skills/skill_games.h
 
     llm/llm_engine.h
     llm/prompt_builder.h
@@ -170,6 +178,40 @@ if(SHERPA_ONNX_LIB)
 endif()
 target_compile_options(ws_voice_server PRIVATE -Wall -Wextra -O2)
 
+# ── 单元测试 ──────────────────────────────────────────
+
+# UTF-8 工具测试
+add_executable(test_utf8 test_utf8.cpp)
+target_include_directories(test_utf8 PRIVATE ${CMAKE_SOURCE_DIR}/utils)
+target_compile_options(test_utf8 PRIVATE -Wall -Wextra -O0 -g)
+
+# VAD 单元测试
+add_executable(test_vad test_vad.cpp
+    audio/vad.cpp)
+target_include_directories(test_vad PRIVATE
+    ${CMAKE_SOURCE_DIR}/audio
+    ${CMAKE_SOURCE_DIR}/utils)
+target_compile_options(test_vad PRIVATE -Wall -Wextra -O0 -g)
+
+# 技能系统测试（独立技能，无需 FunctionCaller/RAG/Memory 等重依赖）
+add_executable(test_skills test_skills.cpp
+    brain/skills/skill_time.cpp
+    brain/skills/skill_calculator.cpp
+    brain/skills/skill_poetry.cpp
+    brain/skills/skill_fortune.cpp
+    brain/skills/skill_entertainment.cpp
+    brain/skills/skill_riddle.cpp
+    brain/skills/skill_games.cpp)
+target_include_directories(test_skills PRIVATE
+    ${CMAKE_SOURCE_DIR}/brain
+    ${CMAKE_SOURCE_DIR}/brain/skills
+    ${CMAKE_SOURCE_DIR}/utils)
+target_link_libraries(test_skills PRIVATE
+    nlohmann_json::nlohmann_json
+    pthread
+    spdlog::spdlog)
+target_compile_options(test_skills PRIVATE -Wall -Wextra -O0 -g)
+
 # 语音情感分析独立测试
 add_executable(test_voice_emotion test_voice_emotion.cpp)
 target_include_directories(test_voice_emotion PRIVATE
@@ -194,6 +236,33 @@ if(SHERPA_ONNX_LIB)
     target_link_libraries(test_streaming PRIVATE ${SHERPA_ONNX_LIB})
     target_compile_definitions(test_streaming PRIVATE SHERPA_ONNX_AVAILABLE)
 endif()
+
+# ── 基准测试工具 ──────────────────────────────────────
+add_executable(benchmark benchmark.cpp
+    speech/asr_engine.cpp
+    speech/tts_engine.cpp
+    llm/llm_engine.cpp
+    llm/prompt_builder.cpp
+    llm/token_counter.cpp
+    pipeline/config.cpp)
+target_include_directories(benchmark PRIVATE
+    ${CMAKE_SOURCE_DIR}/speech
+    ${CMAKE_SOURCE_DIR}/llm
+    ${CMAKE_SOURCE_DIR}/pipeline
+    ${CMAKE_SOURCE_DIR}/utils
+    ${CURL_INCLUDE_DIRS})
+target_link_libraries(benchmark PRIVATE
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    pthread
+    spdlog::spdlog
+    ${ESPEAK_LIB})
+if(SHERPA_ONNX_LIB)
+    target_include_directories(benchmark PRIVATE ${SHERPA_ONNX_INCLUDE})
+    target_link_libraries(benchmark PRIVATE ${SHERPA_ONNX_LIB})
+    target_compile_definitions(benchmark PRIVATE SHERPA_ONNX_AVAILABLE)
+endif()
+target_compile_options(benchmark PRIVATE -Wall -Wextra -O2)
 
 target_include_directories(voice_pipeline PRIVATE
     ${CMAKE_SOURCE_DIR}/pipeline

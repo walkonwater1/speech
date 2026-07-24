@@ -53,9 +53,15 @@ static std::string build_extra_context(
 
 // ── 构造 / 初始化 ────────────────────────────────────
 
+static AsrModelType parse_asr_model_type(const std::string& s)
+{
+    if (s == "zipformer_ctc") return AsrModelType::ZIPFORMER_CTC;
+    return AsrModelType::SENSE_VOICE;  // 默认
+}
+
 VoicePipeline::VoicePipeline(const PipelineConfig& cfg)
     : cfg_(cfg)
-    , asr_(cfg.asr_model_path)
+    , asr_(cfg.asr_model_path, parse_asr_model_type(cfg.asr_model_type))
     , llm_(cfg.ollama_host, cfg.llm_model, cfg.system_prompt)
     , tts_(cfg.tts_rate, cfg.tts_voice, cfg.tts_backend, cfg.piper_model_path)
     , kws_(cfg.wake_word)
@@ -171,6 +177,7 @@ bool VoicePipeline::initialize()
         StreamingASRConfig sa_cfg;
         sa_cfg.backend              = cfg_.streaming_asr_backend;
         sa_cfg.model_path           = sa_model;
+        sa_cfg.model_type           = cfg_.asr_model_type;
         sa_cfg.min_chunk_seconds    = cfg_.streaming_min_chunk;
         sa_cfg.chunk_interval       = cfg_.streaming_chunk_intv;
 
@@ -239,6 +246,8 @@ std::string VoicePipeline::process_text(const std::string& text)
     if (skill_hit) {
         extra += "\n" + sr.result_text;
         std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+        // 内容型技能（笑话/故事/诗词等）：直接返回，不经过LLM避免截断和延迟
+        if (sr.direct) reply = sr.result_text;
     }
 
     // 注入用户长期记忆
@@ -246,7 +255,7 @@ std::string VoicePipeline::process_text(const std::string& text)
 
     // ── 策略 1: ReAct 多步推理（skill 未命中时才用）───
     //     复杂多步任务（如"查天气然后提醒我"）需要 ReAct
-    if (react_ && !skill_hit) {
+    if (reply.empty() && react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
@@ -313,13 +322,15 @@ std::string VoicePipeline::process_text_for_ws(const std::string& text,
     if (skill_hit) {
         extra += "\n" + sr.result_text;
         std::cout << "   [Skill] \"" << text << "\" → " << sr.skill_name << std::endl;
+        // 内容型技能（笑话/故事/诗词等）：直接返回，不经过LLM避免截断
+        if (sr.direct) reply = sr.result_text;
     }
 
     // 注入用户长期记忆
     extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
 
     // ── 策略 1: ReAct 多步推理（skill 未命中时才用）───
-    if (react_ && !skill_hit) {
+    if (reply.empty() && react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
@@ -451,13 +462,15 @@ std::string VoicePipeline::process_voice()
     if (skill_hit) {
         extra += "\n" + sr.result_text;
         std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+        // 内容型技能（笑话/故事/诗词等）：直接返回，不经过LLM避免截断和延迟
+        if (sr.direct) reply = sr.result_text;
     }
 
     // 注入用户长期记忆
     extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
 
     // ── 策略 1: ReAct 多步推理（skill 未命中时才用）───
-    if (react_ && !skill_hit) {
+    if (reply.empty() && react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
@@ -523,12 +536,14 @@ std::string VoicePipeline::process_voice_file(const std::string& wav_path)
     if (skill_hit) {
         extra += "\n" + sr.result_text;
         std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+        // 内容型技能（笑话/故事/诗词等）：直接返回，不经过LLM避免截断和延迟
+        if (sr.direct) reply = sr.result_text;
     }
 
     extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
 
     // ── 策略 1: ReAct（skill 未命中时才用）───────────
-    if (react_ && !skill_hit) {
+    if (reply.empty() && react_ && !skill_hit) {
         auto tools = skill_mgr_.collect_function_defs();
         if (!tools.empty()) {
             auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
@@ -1308,13 +1323,15 @@ void VoicePipeline::process_loop()
         if (skill_hit) {
             extra += "\n" + sr.result_text;
             std::cout << "   [Skill] \"" << prompt << "\" → " << sr.skill_name << std::endl;
+            // 内容型技能（笑话/故事/诗词等）：直接返回，不经过LLM避免截断和延迟
+            if (sr.direct) reply = sr.result_text;
         }
 
         // 注入用户长期记忆
         extra = build_extra_context(extra, user_memory_, cfg_.memory_long_term_enabled);
 
         // ── 策略 1: ReAct 多步推理（skill 未命中时才用）─
-        if (react_ && !skill_hit) {
+        if (reply.empty() && react_ && !skill_hit) {
             auto tools = skill_mgr_.collect_function_defs();
             if (!tools.empty()) {
                 auto exec_fn = [this](const std::string& name, const nlohmann::json& args) {
