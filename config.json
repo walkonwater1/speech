@@ -47,12 +47,12 @@
     "auto_extract": true
   },
   "function_calling": {
-    "enabled": true,
+    "enabled": false,
     "model": ""
   },
   "react": {
-    "enabled": true,
-    "max_steps": 2
+    "enabled": false,
+    "max_steps": 1
   },
   "reflection": {
     "enabled": false,
